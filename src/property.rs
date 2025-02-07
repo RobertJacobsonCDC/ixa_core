@@ -1,65 +1,53 @@
-use std::any::TypeId;
-use std::task::Context;
-use crate::PersonId;
+use crate::{
+    context::Context,
+    PersonId,
+    people::ContextPeopleExt,
+};
+use std::{
+    any::TypeId,
+    fmt::Debug,
+    hash::Hash
+};
 
-pub trait Property: Clone + 'static {
+pub trait Property: Clone + Debug + PartialEq + Hash + 'static {
+    // #[must_use]
+    // fn is_derived() -> bool {
+    //     false
+    // }
 
-  #[must_use]
-  fn is_derived() -> bool {
-    false
-  }
+    #[must_use]
+    fn name() -> &'static str {
+        std::any::type_name::<Self>()
+    }
 
-  #[must_use]
-  fn name() -> &'static str {
-    std::any::type_name::<Self>()
-  }
+    /// Overridden by `DerivedProperty`s, because they also need to register dependencies.
+    fn register(context: &mut Context) {
+        context.register_nonderived_property::<Self>();
+    }
 
+    /// Adds all nonderived dependencies of `Self` to `dependencies`, ***including `Self`***
+    /// if `Self` is nonderived.
+    fn collect_dependencies(dependencies: &mut Vec<TypeId>){
+        dependencies.push(crate::type_of::<Self>());
+    }
 }
 
 pub trait DerivedProperty: Property {
-
-  #[must_use]
-  fn dependencies() -> Vec<TypeId>;
-
-  #[must_use]
-  fn compute(context: &Context, person_id: PersonId) -> Self;
-
+    /// Computes this property value.
+    // ToDo: This could be implemented for all `Property`s by just looking up the value of the property for
+    //       nonderived properties.
+    #[must_use]
+    fn compute(context: &Context, person_id: PersonId) -> Self;
 }
 
-
+/*
+//How `define_derived_property!` implements `DerivedProperty`.
 /// Any type that is `Clone + 'static`
 #[derive(Debug, Copy, Clone)]
 pub struct DerivedPropertyName(bool);
-/*
-// Synthesized impls for `Property` and `DerivedProperty`
-impl Property for DerivedPropertyName {
 
-  fn is_derived() -> bool { true }
-
-  fn name() -> &'static str {
-    stringify!( DerivedPropertyName )
-  }
-}
-
-impl DerivedProperty for DerivedPropertyName {
-  fn dependencies() -> Vec<TypeId> {
-    vec![crate::type_of::<PersonProperty1>()]
-  }
-  fn compute(context: &Context, person_id: PersonId) -> Self {
-    #[allow(unused_imports)]
-    use crate::ContextGlobalPropertiesExt;
-    #[allow(unused_parens)]
-    let (person_prop, global_prop, ) = (
-      context.get_person_property::<PersonProperty1>(person_id),
-      *context.get_global_property_value::<GlobalProperty1>()
-              .expect(&format!("Global property {} not initialized", stringify!( GlobalProperty1 ))),
-    );
-    (|person_prop, global_prop| { person_prop >= global_prop }
-    )(person_prop, global_prop)
-  }
-}
+// define_derived_property!(DerivedPropertyName, [PersonProperty1, PersonProperty2], [GlobalProperty1, GlobalProperty2], |pprop1, pprop2, gprop1, gprop2| { DerivedPropertyName(pprop1.0 >= gprop2.0) });
 */
-
 
 /// Defines a derived person property with the following parameters:
 /// * `$person_property`: The property type
@@ -75,31 +63,44 @@ macro_rules! define_derived_property {
         |$($param:ident),+| $derive_fn:expr
     ) => {
         impl $crate::Property for $derived_property {
-            fn is_derived() -> bool { true }
+            fn name() -> &'static str {
+                stringify!($derived_property)
+            }
 
-            fn name() -> &'static str { stringify!($derived_property) }
+            fn register(context: &$crate::Context) {
+                use $crate::people::ContextPeopleExt;
+
+                context.register_derived_property::<$derived_property>();
+            }
+
+            fn collect_dependencies(dependencies: &mut Vec<std::any::TypeId>) {
+                $(
+                    $dependency::collect_dependencies(dependencies);
+                )*
+            }
         }
 
         impl $crate::DerivedProperty for $derived_property {
-          fn dependencies() -> Vec<std::any::TypeId> {
-                vec![$(crate::type_of::<$dependency>()),+]
-            }
-
-            fn compute(context: &$crate::context::Context, person_id: $crate::people::PersonId) -> Self {
+            fn compute(context: &$crate::context::Context, person_id: $crate::PersonId) -> Self {
                 #[allow(unused_imports)]
-                use $crate::ContextGlobalPropertiesExt;
+                use $crate::global_properties::ContextGlobalPropertiesExt;
                 #[allow(unused_parens)]
                 let ($($param,)*) = (
-                    $(context.get_person_property_unchecked::<$dependency>(person_id)),*,
+                    $(context.get_person_property::<$dependency>(person_id).unwrap()),*,
                     $(
                         *context.get_global_property_value::<$global_dependency>()
-                            .expect(&format!("Global property {} not initialized", stringify!($global_dependency))),
-                    ),*
+                            .unwrap_or_else(|| panic!(
+                                "Global property {} not initialized",
+                                stringify!($global_dependency)
+                            )),
+                    )*
                 );
+
                 (|$($param),+| $derive_fn)($($param),+)
             }
         }
     };
+
     (
         $derived_property:ty,
         [$($dependency:ident),*],
@@ -114,5 +115,3 @@ macro_rules! define_derived_property {
     };
 }
 pub use define_derived_property;
-
-// define_derived_property!(DerivedPropertyName, [PersonProperty1], [GlobalProperty1], |person_prop, global_prop| { DerivedPropertyName(person_prop >= global_prop) });

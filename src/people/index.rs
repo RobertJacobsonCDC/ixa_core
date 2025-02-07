@@ -1,15 +1,16 @@
-use std::{
-    any::{Any, TypeId},
-    collections::{HashMap, HashSet},
-    hash::{Hash, Hasher},
-    marker::PhantomData
-};
 use crate::{
-    PersonId,
-    type_of,
     context::Context,
     people::ContextPeopleExt,
-    property::Property
+    PersonId,
+    property::Property,
+    type_of,
+    TypeId,
+};
+use std::{
+    any::Any,
+    collections::{HashMap, HashSet},
+    hash::{Hash, Hasher},
+    marker::PhantomData,
 };
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -60,7 +61,7 @@ impl Hasher for IndexValueHasher {
 }
 
 // An index for a single property.
-pub struct Index<T: Property> {
+pub(crate) struct IndexCore<T: Property> {
     // The hash of the property value maps to a list of PersonIds
     // or None if we're not indexing
     pub(super) lookup: Option<HashMap<IndexValue, HashSet<PersonId>>>,
@@ -72,21 +73,36 @@ pub struct Index<T: Property> {
     phantom: PhantomData<T>,
 }
 
-impl<T: Property> Index<T> {
+impl<T: Property> IndexCore<T> {
     pub(super) fn new() -> Self {
         Self {
             lookup: None,
             max_indexed: 0,
-            phantom: PhantomData::default()
+            phantom: PhantomData::default(),
         }
     }
+}
 
-    pub(super) fn add_person(&mut self, context: &mut Context, person_id: PersonId) {
-        let value = context.get_person_property::<T>(person_id);
-        let value = value.unwrap_or_else(|_| {
+
+// The pub(crate) interface to `IndexCore<T>`
+pub(crate) trait Index: Any {
+    fn add_person(&mut self, context: &mut Context, person_id: PersonId);
+    fn remove_person(&mut self, context: &mut Context, person_id: PersonId);
+    fn index_unindexed_people(&mut self, context: &mut Context);
+}
+
+impl<T: Property> Index for IndexCore<T> {
+
+    fn add_person(&mut self, context: &mut Context, person_id: PersonId) {
+        let value = context.get_person_property::<T>(person_id).clone();
+        let value = value.unwrap_or_else(|| {
             // ToDo: This is what Ixa does, but it seems like we'd want to be able to query for people who do not have
             //       a value for a property. Have `None` hash to 0 or something.
-            panic!("{:?} not found has no {} value to index", person_id, T::name());
+            panic!(
+                "{:?} has no {} value to index",
+                person_id,
+                T::name()
+            );
         });
 
         let hash = IndexValue::new(&value);
@@ -98,11 +114,7 @@ impl<T: Property> Index<T> {
             .insert(person_id);
     }
 
-    pub(super) fn remove_person(
-        &mut self,
-        context: &mut Context,
-        person_id: PersonId,
-    ) {
+    fn remove_person(&mut self, context: &mut Context, person_id: PersonId) {
         let value = context.get_person_property::<T>(person_id);
         // ToDo: If we index `None` values, we'd have to remove for None, too
         if let Some(value) = value {
@@ -110,7 +122,7 @@ impl<T: Property> Index<T> {
             let index_value = IndexValue::new(&value);
             let map: &mut HashMap<IndexValue, HashSet<PersonId>> = self.lookup.as_mut().unwrap();
             let set: &mut HashSet<PersonId> = map.get_mut(&index_value).unwrap();
-            
+
             set.remove(&person_id);
             // Clean up the entry if there are no people
             if set.is_empty() {
@@ -119,7 +131,7 @@ impl<T: Property> Index<T> {
         }
     }
 
-    pub(super) fn index_unindexed_people(&mut self, context: &mut Context) {
+    fn index_unindexed_people(&mut self, context: &mut Context) {
         if self.lookup.is_none() {
             return;
         }
@@ -132,29 +144,34 @@ impl<T: Property> Index<T> {
     }
 }
 
-
 /// A map from `TypeId` to `Index<T>`. This follows the `AnyMap` pattern. This is what `PeopleData` uses to
 /// look up `Index`es.
 pub(crate) struct IndexMap {
-    /// This is actually a HashMap<TypeId, Box<Index<T>>>
+    /// This is actually a HashMap<TypeId, Box<IndexCore<T>>>
     map: HashMap<TypeId, Box<dyn Any>>,
 }
 
 impl IndexMap {
-    pub fn insert<T: Property> (&mut self, index: Index<T>) {
-        self.map.insert(type_of::<T>(), Box::new(index)).expect("failed to insert type Index into IndexMap");
+    pub fn insert<T: Property>(&mut self, index: IndexCore<T>) {
+        self.map
+            .insert(type_of::<T>(), Box::new(index))
+            .expect("failed to insert type Index into IndexMap");
     }
 
     #[must_use]
-    pub fn get<T: Property>(&self) -> Option<&Index<T>> {
+    pub fn get<T: Property>(&self) -> Option<&IndexCore<T>> {
         let index = self.map.get(&type_of::<T>());
-        index.downcast_ref()
+        // ToDo: Use `Any::downcast_ref_unchecked`. The following is guaranteed safe, as only an
+        //       `IndexCore<T>` is mapped to by `type_of::<T>()`.
+        index.map(|any| any.downcast_ref::<IndexCore<T>>().unwrap())
     }
 
     #[must_use]
-    pub fn get_mut<T: Property>(&self) -> Option<&mut Index<T>> {
-        let index = self.map.get(&type_of::<T>());
-        index.downcast_mut()
+    pub fn get_mut<T: Property>(&mut self) -> Option<&mut IndexCore<T>> {
+        let index = self.map.get_mut(&type_of::<T>());
+        // ToDo: Use `Any::downcast_mut_unchecked`. The following is guaranteed safe, as only an
+        //       `IndexCore<T>` is mapped to by `type_of::<T>()`.
+        index.map(|any| any.downcast_mut::<IndexCore<T>>().unwrap() )
     }
 }
 
@@ -199,13 +216,12 @@ pub fn process_indices(
 mod test {
     // Tests in `src/people/query.rs` also exercise indexing code.
 
-    use crate::context::Context;
+    use super::IndexValue;
     use crate::property::Property;
-    use super::{Index, IndexValue};
 
     #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
     struct Age(u8);
-    impl Property for Age{
+    impl Property for Age {
         fn name() -> &'static str {
             "Age"
         }

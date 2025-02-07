@@ -1,12 +1,12 @@
-use std::any::TypeId;
-
 use seq_macro::seq;
 
 use crate::{
-    property::Property,
-    index::IndexValue,
+    TypeId,
     context::Context,
-    type_of
+    index::IndexValue,
+    people::ContextPeopleExt,
+    property::Property,
+    type_of,
 };
 
 /// Encapsulates a person query.
@@ -29,7 +29,7 @@ impl Query for () {
 
 // Implement the query version with one parameter.
 impl<T1: Property> Query for T1 {
-    fn setup(&self, context: &Context) {
+    fn setup(&self, context: &mut Context) {
         context.register_property::<T1>();
     }
 
@@ -84,11 +84,11 @@ seq!(Z in 1..20 {
 /// #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug, Hash)]
 /// struct Age(u8);
 /// impl Property for Age {}
-/// 
+///
 /// #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug, Hash)]
 /// struct Alive(bool);
 /// impl Property for Alive {}
-/// 
+///
 /// let context = Context::new();
 /// context.query_people(QueryAnd::new(Age(42), Alive(true)));
 /// ```
@@ -128,15 +128,15 @@ where
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use std::any::TypeId;
-    use crate::define_derived_property;
-    use crate::people::{ContextPeopleExt, PeopleData};
-    use crate::property::Property;
-    use crate::context::Context;
     use super::*;
+    use crate::context::Context;
+    use crate::define_derived_property;
+    use crate::people::people_data::PeopleData;
+    use crate::property::Property;
+    use std::any::TypeId;
+    use crate::people::context_ext::ContextPeopleExt;
 
     #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug, Hash)]
     struct Age(u8);
@@ -148,15 +148,11 @@ mod tests {
         Low,
     }
     impl Property for RiskCategory {}
-    
-    
 
     #[test]
     fn query_people() {
         let mut context = Context::new();
-        let _ = context
-            .add_person(RiskCategory::High)
-            .unwrap();
+        let _ = context.add_person(RiskCategory::High).unwrap();
 
         let people = context.query_people(RiskCategory::High);
         assert_eq!(people.len(), 1);
@@ -173,32 +169,22 @@ mod tests {
     #[test]
     fn query_people_count() {
         let mut context = Context::new();
-        let _ = context
-            .add_person(RiskCategory::High)
-            .unwrap();
+        let _ = context.add_person(RiskCategory::High).unwrap();
 
-        assert_eq!(
-            context.query_people_count(RiskCategory::High),
-            1
-        );
+        assert_eq!(context.query_people_count(RiskCategory::High), 1);
     }
 
     #[test]
     fn query_people_count_empty() {
         let context = Context::new();
 
-        assert_eq!(
-            context.query_people_count(RiskCategory::High),
-            0
-        );
+        assert_eq!(context.query_people_count(RiskCategory::High), 0);
     }
 
     #[test]
     fn query_people_macro_index_first() {
         let mut context = Context::new();
-        let _ = context
-            .add_person(RiskCategory::High)
-            .unwrap();
+        let _ = context.add_person(RiskCategory::High).unwrap();
         context.index_property::<RiskCategory>();
         assert!(property_is_indexed::<RiskCategory>(&context));
         let people = context.query_people(RiskCategory::High);
@@ -231,9 +217,7 @@ mod tests {
     #[test]
     fn query_people_macro_change() {
         let mut context = Context::new();
-        let person1 = context
-            .add_person(RiskCategory::High)
-            .unwrap();
+        let person1 = context.add_person(RiskCategory::High).unwrap();
 
         let people = context.query_people(RiskCategory::High);
         assert_eq!(people.len(), 1);
@@ -250,9 +234,7 @@ mod tests {
     #[test]
     fn query_people_index_after_add() {
         let mut context = Context::new();
-        let _ = context
-            .add_person(RiskCategory::High)
-            .unwrap();
+        let _ = context.add_person(RiskCategory::High).unwrap();
         context.index_property::<RiskCategory>();
         assert!(property_is_indexed::<RiskCategory>(&context));
         let people = context.query_people(RiskCategory::High);
@@ -262,17 +244,13 @@ mod tests {
     #[test]
     fn query_people_add_after_index() {
         let mut context = Context::new();
-        let _ = context
-            .add_person(RiskCategory::High)
-            .unwrap();
+        let _ = context.add_person(RiskCategory::High).unwrap();
         context.index_property::<RiskCategory>();
         assert!(property_is_indexed::<RiskCategory>(&context));
         let people = context.query_people(RiskCategory::High);
         assert_eq!(people.len(), 1);
 
-        let _ = context
-            .add_person(RiskCategory::High)
-            .unwrap();
+        let _ = context.add_person(RiskCategory::High).unwrap();
         let people = context.query_people(RiskCategory::High);
         assert_eq!(people.len(), 2);
     }
@@ -308,15 +286,9 @@ mod tests {
     #[test]
     fn query_people_intersection() {
         let mut context = Context::new();
-        let _ = context
-            .add_person((Age(42), RiskCategory::High))
-            .unwrap();
-        let _ = context
-            .add_person((Age(42), RiskCategory::High))
-            .unwrap();
-        let _ = context
-            .add_person(((Age(40), RiskCategory::Low)))
-            .unwrap();
+        let _ = context.add_person((Age(42), RiskCategory::High)).unwrap();
+        let _ = context.add_person((Age(42), RiskCategory::High)).unwrap();
+        let _ = context.add_person(((Age(40), RiskCategory::Low))).unwrap();
 
         let people = context.query_people((Age(42), RiskCategory::High));
         assert_eq!(people.len(), 1);
@@ -325,15 +297,9 @@ mod tests {
     #[test]
     fn query_people_intersection_non_macro() {
         let mut context = Context::new();
-        let _ = context
-            .add_person((Age(42), RiskCategory::High))
-            .unwrap();
-        let _ = context
-            .add_person((Age(42), RiskCategory::High))
-            .unwrap();
-        let _ = context
-            .add_person(((Age(40), RiskCategory::Low)))
-            .unwrap();
+        let _ = context.add_person((Age(42), RiskCategory::High)).unwrap();
+        let _ = context.add_person((Age(42), RiskCategory::High)).unwrap();
+        let _ = context.add_person(((Age(40), RiskCategory::Low))).unwrap();
 
         let people = context.query_people((Age(42), RiskCategory::High));
         assert_eq!(people.len(), 1);
@@ -342,15 +308,9 @@ mod tests {
     #[test]
     fn query_people_intersection_one_indexed() {
         let mut context = Context::new();
-        let _ = context
-            .add_person((Age(42), RiskCategory::High))
-            .unwrap();
-        let _ = context
-            .add_person((Age(42), RiskCategory::High))
-            .unwrap();
-        let _ = context
-            .add_person(((Age(40), RiskCategory::Low)))
-            .unwrap();
+        let _ = context.add_person((Age(42), RiskCategory::High)).unwrap();
+        let _ = context.add_person((Age(42), RiskCategory::High)).unwrap();
+        let _ = context.add_person(((Age(40), RiskCategory::Low))).unwrap();
 
         context.index_property(Age);
         let people = context.query_people((Age(42), RiskCategory::High));
@@ -362,7 +322,7 @@ mod tests {
         let mut context = Context::new();
         #[derive(Copy, Clone, Eq, PartialEq, Debug)]
         struct Senior(bool);
-        define_derived_property!(Senior, [Age], |age| age >= Age(65));
+        define_derived_property!(Senior, [Age], |age| Senior(age >= Age(65)));
 
         let person = context.add_person(Age(64)).unwrap();
         let _ = context.add_person(Age(88)).unwrap();
@@ -409,9 +369,7 @@ mod tests {
     #[test]
     fn query_and_returns_people() {
         let mut context = Context::new();
-        context
-            .add_person((Age(42), RiskCategory::High))
-            .unwrap();
+        context.add_person((Age(42), RiskCategory::High)).unwrap();
 
         let people = context.query_people(QueryAnd::new(Age(42), RiskCategory::High));
         assert_eq!(people.len(), 1);
@@ -420,9 +378,7 @@ mod tests {
     #[test]
     fn query_and_conflicting() {
         let mut context = Context::new();
-        context
-            .add_person((Age(42), RiskCategory::High))
-            .unwrap();
+        context.add_person((Age(42), RiskCategory::High)).unwrap();
 
         let people = context.query_people(QueryAnd::new(Age(42), Age(64)));
         assert_eq!(people.len(), 0);
