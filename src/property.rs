@@ -173,4 +173,3 @@ macro_rules! define_derived_property {
         );
     };
 }
-pub use define_derived_property;

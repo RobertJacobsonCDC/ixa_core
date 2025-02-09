@@ -1,7 +1,3 @@
-use std::{
-    cell::Ref,
-    collections::HashSet
-};
 use crate::{
     context::Context,
     error::IxaError,
@@ -14,10 +10,9 @@ use crate::{
     },
     PersonId,
     property::{
-        DerivedProperty, 
+        DerivedProperty,
         Property
     },
-    TypeId,
     type_of,
 };
 
@@ -107,15 +102,17 @@ impl ContextPeopleExt for Context {
         *property = Some(value);
     }
 
-    fn query_people<T: Query>(&mut self, q: T) -> Vec<PersonId> {
-        T::setup(&q, self);
+    fn query_people<T: Query>(&mut self, query: T) -> Vec<PersonId> {
+        T::setup(&query, self);
+        
         let mut result = Vec::new();
-        self.query_people_internal(
+        query.execute_query(
+            self, 
             |person| {
                 result.push(person);
-            },
-            &q,
+            }
         );
+        
         result
     }
 
@@ -127,9 +124,8 @@ impl ContextPeopleExt for Context {
 
 pub(crate) trait ContextPeopleExtInternal {
     fn register_indexer<T: Property>(&mut self);
-    fn add_to_index_maybe<T: Property>(&mut self, person_id: PersonId, property: T);
+    fn add_to_index_maybe<T: Property>(&mut self, person_id: PersonId);
     fn remove_from_index_maybe<T: Property>(&mut self, person_id: PersonId);
-    fn query_people_internal<Q: Query>(&mut self, accumulator: impl FnMut(PersonId), query: Q);
     /// Registers the type with all of its dependencies and then registers
     fn register_derived_property<T: DerivedProperty>(&mut self);
     fn register_nonderived_property<T: Property>(&mut self);
@@ -137,7 +133,10 @@ pub(crate) trait ContextPeopleExtInternal {
 
 impl ContextPeopleExtInternal for Context {
     fn register_indexer<T: Property>(&mut self) {
-        let property_indexes = self.get_data_container_mut::<PeopleData>().property_indexes.get_mut();
+        let property_indexes = self
+            .get_data_container_mut::<PeopleData>()
+            .property_indexes
+            .get_mut();
         let type_id = type_of::<T>();
 
         // This method should only be called during initial Property registration.
@@ -145,36 +144,32 @@ impl ContextPeopleExtInternal for Context {
         property_indexes.insert(Index::<T>::new());
     }
 
-    /// Executes the query, accumulating the results with `accumulator`.
-    fn query_people_internal<Q: Query>(&mut self, accumulator: impl FnMut(PersonId), query: Q) {
-        let mut indexes = Vec::<Ref<HashSet<PersonId>>>::new();
-        let mut unindexed = Vec::<(TypeId, IndexValue)>::new();
+    fn add_to_index_maybe<T: Property>(&mut self, person_id: PersonId) {
+        let value = self.get_person_property::<T>(person_id).clone();
+        let index_value = IndexValue::new(&value.unwrap());
+        let people_data = self.get_data_container_mut::<PeopleData>();
 
-        // 1. Refresh the indexes for each property in the query.
-        query.refresh_indexes(self);
-        
-        // 2. Collect the index entry corresponding to the value.
-        // let property_hashes = query.get_query();
-        // let people_data = self.get_data_container::<PeopleData>();
-        
-        for (t, hash) in property_hashes {
-            let index = people_data.get_index_ref(t).unwrap();
-            if let Ok(lookup) = Ref::filter_map(index, |x| x.lookup.as_ref()) {
-                if let Ok(matching_people) =
-                    Ref::filter_map(lookup, |x| x.get(&hash).map(|entry| &entry.1))
-                {
-                    indexes.push(matching_people);
-                } else {
-                    // This is empty and so the intersection will
-                    // also be empty.
-                    return;
+        let index = people_data.get_index_mut::<T>();
+        if index.lookup.is_some() {
+            index.insert((person_id, index_value));
+        }
+    }
+
+    fn remove_from_index_maybe<T: Property>(&mut self, person_id: PersonId) {
+        let value = self.get_person_property::<T>(person_id).clone();
+        let index_value = IndexValue::new(&value.unwrap());
+        let people_data = self.get_data_container_mut::<PeopleData>();
+
+        let index = people_data.get_index_mut::<T>();
+        if let Some(lookup) = &mut index.lookup {
+            if let Some(index_set) = lookup.get_mut(&index_value){
+                index_set.remove(&person_id);
+                // Clean up the entry if there are no people
+                if index_set.is_empty() {
+                    lookup.remove(&index_value);
                 }
-            } else {
-                // No index, so we'll get to this after.
-                unindexed.push((t, hash));
             }
         }
-
     }
 
     /// Registers the type with all of its dependencies and then registers an index for the type.
@@ -183,7 +178,7 @@ impl ContextPeopleExtInternal for Context {
         let type_id = type_of::<T>();
 
         // This method should only be called during initial Property registration.
-        assert!(!people_data.property_indexes.contains_key(&type_id));
+        assert!(!people_data.property_indexes.borrow().contains_key(&type_id));
 
         let mut dependencies = vec![];
         T::collect_dependencies(&mut dependencies);

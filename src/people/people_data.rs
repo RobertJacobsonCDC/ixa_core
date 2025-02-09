@@ -1,6 +1,6 @@
 use std::{
-    any::{Any, TypeId},
-    cell::{RefCell},
+    any::TypeId,
+    cell::RefCell,
     collections::HashMap
 };
 use crate::{
@@ -88,11 +88,6 @@ impl PeopleData {
         self.property_indexes
             .get_mut()
             .get_container_mut::<T>()
-            // .map(|idx| {
-            //     idx.downcast_mut::<Box<Index<T>>>()
-            //         .unwrap()
-            //         .as_mut()
-            // })
     }
 
     pub fn get_index_ref<T: Property>(&mut self) -> Option<&Index<T>> {
@@ -111,6 +106,38 @@ impl PeopleData {
         }
 
         Ok(())
+    }
+
+    /// Convenience function to iterate over the current population.
+    /// Note that this doesn't hold a reference to PeopleData, so if
+    /// you change the population while using it, it won't notice.
+    pub(super) fn people_iterator(&self) -> Box<dyn Iterator<Item = PersonId>> {
+        pub(super) struct PeopleIterator {
+            population: usize,
+            person_id: usize,
+        }
+
+        impl Iterator for PeopleIterator {
+            type Item = PersonId;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                let ret = if self.person_id < self.population {
+                    Some(PersonId(self.person_id))
+                } else {
+                    None
+                };
+                self.person_id += 1;
+
+                ret
+            }
+        }
+        
+        Box::new(
+            PeopleIterator {
+                population: self.current_population,
+                person_id: 0,
+            }
+        )
     }
 
 }

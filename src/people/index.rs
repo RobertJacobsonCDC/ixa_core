@@ -1,6 +1,13 @@
 // ToDo: Make this module generic over entity instead of specific to `PeopleId`
 
-use crate::{context::Context, people::ContextPeopleExt, PersonId, property::Property, type_of, TypeId, define_any_map_container};
+use crate::{
+    context::Context,
+    people::ContextPeopleExt,
+    property::Property,
+    type_of,
+    PersonId,
+    TypeId
+};
 use std::{
     any::Any,
     collections::{HashMap, HashSet},
@@ -57,12 +64,11 @@ impl Hasher for IndexValueHasher {
 
 // An index for a single property.
 pub(crate) struct Index<T: Property> {
-    // The hash of the property value maps to a list of PersonIds
-    // or None if we're not indexing.
+    // The hash of the property value maps to a list of PersonIds or None if we're not indexing.
     pub(super) lookup: Option<HashMap<IndexValue, HashSet<PersonId>>>,
 
-    // The largest person ID that has been indexed. Used so that we
-    // can lazily index when a person is added.
+    // The largest person ID that has been indexed. Used so that we can lazily index when a 
+    // person is added.
     pub(super) max_indexed: usize,
 
     phantom: PhantomData<T>,
@@ -79,7 +85,7 @@ impl<T: Property> Index<T> {
 
     /// Looks up the value of the `T` property for `person_id` and adds `person_id` to the index 
     /// set for that `value`.
-    fn add_person(&mut self, context: &Context, person_id: PersonId) {
+    pub(crate) fn add_person(&mut self, context: &Context, person_id: PersonId) {
         let value = context.get_person_property::<T>(person_id).clone();
         let value = value.unwrap_or_else(|| {
             // ToDo: This is what Ixa does, but it seems like we'd want to be able to query for people who do not have
@@ -127,7 +133,7 @@ impl<T: Property> Index<T> {
     }
     
     /// Inserts the `person_id` into the index set for the given index value.
-    fn insert(&mut self, (person_id, index_value): (PersonId, IndexValue)) {
+    pub(crate) fn insert(&mut self, (person_id, index_value): (PersonId, IndexValue)) {
         self.lookup
             .as_mut()
             .unwrap()
@@ -158,32 +164,32 @@ impl Default for IndexMap{
 }
 
 impl IndexMap {
-    #[inline]
+    #[inline(always)]
     pub fn new() -> IndexMap {
         IndexMap {
             map: HashMap::new(),
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn insert<T: Property>(&mut self, index: Index<T>) {
         self.map
             .insert(type_of::<T>(), Box::new(index))
             .expect("failed to insert type Index into IndexMap");
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn get_container_mut<T: Property + 'static>(&mut self) -> &mut Index<T> {
         unsafe {
             self.map
                 .entry(type_of::<T>())
-                .or_insert_with(|| Box::new((Index::<T>::new())))
+                .or_insert_with(|| Box::new(Index::<T>::new()))
                 .downcast_mut()
                 .unwrap_unchecked()
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn get_container_ref<T: Property + 'static>(&self) -> Option<&Index<T>> {
         self.map
             .get(&type_of::<T>())
@@ -195,13 +201,18 @@ impl IndexMap {
             )
     }
 
-    #[inline]
-    pub unsafe fn get_container_ref_unchecked<T: Property + 'static>(&self) -> &Index<T> {
+    #[inline(always)]
+    pub unsafe fn get_container_ref_unchecked<T: Property + 'static>(&self) -> &Index<T> { unsafe {
         self.map
             .get(&type_of::<T>())
             .unwrap_unchecked()
             .downcast_ref()
             .unwrap_unchecked()
+    }}
+    
+    #[inline(always)]
+    pub fn contains_key(&self, type_of: &TypeId) -> bool {
+        self.map.contains_key(type_of)
     }
 }
 

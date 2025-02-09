@@ -44,7 +44,6 @@ let height: Height = container.pop().unwrap();
 You can do this in ~2X the speed and without the `'static` restriction if you're willing to go unsafe
 
 */
-
 use crate::{
     type_of,
     TypeId
@@ -88,7 +87,7 @@ impl AnyMap {
         }
     }
 
-    pub unsafe fn get_container_ref_unchecked<T: 'static>(&self) -> &Vec<T> {
+    pub unsafe fn get_container_ref_unchecked<T: 'static>(&self) -> &Vec<T> { unsafe {
         self.map
             .get(&type_of::<T>())
             .unwrap_unchecked() // This is unsafe; the caller must guarantee the type exists.
@@ -96,7 +95,7 @@ impl AnyMap {
             //       because only a `Box<Vec<T>>` can be mapped to by `type_of::<T>()`.
             .downcast_ref()
             .unwrap_unchecked()
-    }
+    }}
 
     pub fn get_container_ref<T: 'static>(&self) -> Option<&Vec<T>> {
         // ToDo: Use `Any::downcast_ref_unchecked` (nightly feature). This is guaranteed safe, 
@@ -187,13 +186,13 @@ macro_rules! define_any_map_container {
             }
             
             #[inline]
-            pub unsafe fn get_container_ref_unchecked<$generic : $( $traitfirst $(+ $traitrest)* +)? 'static>(&self) -> &$container<$generic> {
+            pub unsafe fn get_container_ref_unchecked<$generic : $( $traitfirst $(+ $traitrest)* +)? 'static>(&self) -> &$container<$generic> { unsafe {
                 self.map
                     .get(&$crate::type_of::<$generic>())
                     .unwrap_unchecked() // The caller must guarantee this is safe
                     .downcast_ref()
                     .unwrap_unchecked() // This is always safe
-            }
+            }}
         }
     };
 }

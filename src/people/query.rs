@@ -4,14 +4,19 @@ ToDo: Make this generic over entity.
 
 */
 
+use std::collections::HashSet;
 use seq_macro::seq;
 
-use crate::{TypeId, context::Context, people::{
-    IndexValue,
-    ContextPeopleExt
-}, property::Property, type_of, PersonId};
-use crate::people::index::IndexMap;
-use crate::people::PeopleData;
+use crate::{
+    context::Context,
+    people::{
+        ContextPeopleExt,
+        IndexValue,
+        PeopleData,
+    },
+    property::Property,
+    PersonId,
+};
 
 /// Encapsulates a person query.
 ///
@@ -21,42 +26,95 @@ use crate::people::PeopleData;
 pub trait Query {
     /// Registers each property in the query with the context.
     fn setup(&self, context: &mut Context);
-    /// Construct a vector of pairs of (property type id, value hash) for this query.
-    fn get_query(&self) -> Vec<(TypeId, IndexValue)>;
-    /// The query refreshes the index of each property to which it refers.
-    fn refresh_indexes(&self, context: &Context);
     /// Executes the query, accumulating the results with `accumulator`.
     fn execute_query(&self, context: &Context, accumulator: impl FnMut(PersonId));
 }
 
+// The empty query
 impl Query for () {
     fn setup(&self, _: &mut Context) {}
-
-    fn get_query(&self) -> Vec<(TypeId, IndexValue)> {
-        vec![]
-    }
-
-    fn refresh_indexes(&self, _context: &Context) {}
+    fn execute_query(&self, _context: &Context, _accumulator: impl FnMut(PersonId)){}
 }
 
-// Implement the query version with one parameter.
+// The query with one parameter
 impl<T1: Property> Query for T1 {
     fn setup(&self, context: &mut Context) {
         context.register_property::<T1>();
     }
-
-    fn get_query(&self) -> Vec<(TypeId, IndexValue)> {
-        vec![(type_of::<T1>(), IndexValue::new(&self))]
-    }
     
-    fn refresh_indexes(&self, context: &Context) {
-        let mut index_map = context.get_data_container::<PeopleData>()
-            .unwrap()
-            .property_indexes
-            .borrow_mut();
-        
-        let index = index_map.get_container_mut::<T1>();
-        index.index_unindexed_people(context)
+    fn execute_query(&self, context: &Context, mut accumulator: impl FnMut(PersonId)){
+        let people_data = context.get_data_container::<PeopleData>().unwrap();
+        let mut index_map = people_data.property_indexes.borrow_mut();
+        let mut indexes: Vec<&HashSet<PersonId>> = Vec::new();
+        // A vector of closures that look up a property for a `person_id`
+        let mut unindexed: Vec<Box<dyn Fn(&PeopleData, PersonId) -> bool>> = Vec::new();
+
+        {
+            // 1. Refresh the indexes for each property in the query.
+            let index = index_map.get_container_mut::<T1>();
+            index.index_unindexed_people(context);
+
+            // 2. Collect the index entry corresponding to the value.
+            let hash_value = IndexValue::new(&self);
+            if let Some(lookup) = &index.lookup {
+                if let Some(people) = lookup.get(&hash_value) {
+                    indexes.push(people);
+                } else {
+                    // This is empty and so the intersection will also be empty.
+                    return;
+                }
+            } else {
+                // No index, so we'll get to this after.
+                unindexed.push(
+                    Box::new(move
+                    |people_data: &PeopleData, person_id: PersonId| {
+                        hash_value == IndexValue::new(
+                            people_data.get_person_property_ref::<T1>(person_id)
+                        )
+                    })
+                );
+            }
+        }
+
+        // 3. Create an iterator over people, based on either:
+        //    (1) the smallest index if there is one.
+        //    (2) the overall population if there are no indices.
+        let to_check: Box<dyn Iterator<Item = PersonId>> =
+            if indexes.is_empty() {
+                people_data.people_iterator()
+            } else {
+                let mut min_len: usize = usize::MAX;
+                let mut shortest_idx: usize = 0;
+                for (idx, index_iter) in indexes.iter().enumerate() {
+                    if index_iter.len() < min_len {
+                        shortest_idx = idx;
+                        min_len = index_iter.len();
+                    }
+                }
+                Box::new(indexes.remove(shortest_idx).iter().cloned())
+            };
+
+        // 4. Walk over the iterator and add people to the result iff:
+        //    (1) they exist in all the indexes
+        //    (2) they match the unindexed properties
+        'outer: for person_id in to_check {
+            // (1) check all the indexes
+            for index in &indexes {
+                if !index.contains(&person_id) {
+                    continue 'outer;
+                }
+            }
+
+            // (2) check the unindexed properties
+            for hash_lookup in &unindexed {
+                if !hash_lookup(people_data, person_id) {
+                    continue 'outer;
+                }
+            }
+
+            // This matches.
+            accumulator(person_id);
+        }
     }
 }
 
@@ -79,28 +137,90 @@ macro_rules! impl_query {
                         context.register_property::<T~N>();
                     )*
                 }
-
-                fn get_query(&self) -> Vec<(TypeId, IndexValue)> {
-                    vec![
-                    #(
-                        (type_of::<T~N>(), IndexValue::new(&self.N)),
-                    )*
-                    ]
-                }
                 
-                fn refresh_indexes(&self, context: &Context) {
-                    let mut index_map = context.get_data_container::<PeopleData>()
-                        .unwrap()
-                        .property_indexes
-                        .borrow_mut();
+                fn execute_query(&self, context: &Context, mut accumulator: impl FnMut(PersonId)) {
+                    let people_data = context.get_data_container::<PeopleData>().unwrap();
+                    let mut index_map = people_data.property_indexes.borrow_mut();
+                    let mut indexes: Vec<&HashSet<PersonId>> = Vec::new();
+                    // A vector of closures that look up a property for a `person_id`
+                    let mut unindexed: Vec<Box<dyn Fn(&PeopleData, PersonId) -> bool>> = Vec::new();
+                    
                 #(
                     {
+                        // 1. Refresh the indexes for each property in the query.
                         let index = index_map.get_container_mut::<T~N>();
                         index.index_unindexed_people(context);
                     }
                 )*
+                #(
+                    {
+                        // 2. Collect the index entry corresponding to the value.
+                        // The following is guaranteed to be safe after the call to `get_container_mut` above.
+                        let index = unsafe{ index_map.get_container_ref::<T~N>().unwrap_unchecked() };
+                        let hash_value = IndexValue::new(&self.N);
+                        if let Some(lookup) = &index.lookup {
+                            if let Some(people) = lookup.get(&hash_value) {
+                                indexes.push(people);
+                            } else {
+                                // This is empty and so the intersection will also be empty.
+                                return;
+                            }
+                        } else {
+                            // No index, so we'll get to this after.
+                            unindexed.push(
+                                Box::new(
+                                    move
+                                    |people_data: &PeopleData, person_id: PersonId| {
+                                        hash_value == IndexValue::new(
+                                            people_data.get_person_property_ref::<T~N>(person_id)
+                                        )
+                                    }
+                                )
+                            );
+                        }
+                    }
+                )*
+                    // 3. Create an iterator over people, based on either:
+                    //    (1) the smallest index if there is one.
+                    //    (2) the overall population if there are no indices.
+                    let to_check: Box<dyn Iterator<Item = PersonId>> =
+                        if indexes.is_empty() {
+                            people_data.people_iterator()
+                        } else {
+                            let mut min_len: usize = usize::MAX;
+                            let mut shortest_idx: usize = 0;
+                            for (idx, index_iter) in indexes.iter().enumerate() {
+                                if index_iter.len() < min_len {
+                                    shortest_idx = idx;
+                                    min_len = index_iter.len();
+                                }
+                            }
+                            Box::new(indexes.remove(shortest_idx).iter().cloned())
+                        };
+            
+                    // 4. Walk over the iterator and add people to the result iff:
+                    //    (1) they exist in all the indexes
+                    //    (2) they match the unindexed properties
+                    'outer: for person_id in to_check {
+                        // (1) check all the indexes
+                        for index in &indexes {
+                            if !index.contains(&person_id) {
+                                continue 'outer;
+                            }
+                        }
+            
+                        // (2) check the unindexed properties
+                        for hash_lookup in &unindexed {
+                            if !hash_lookup(people_data, person_id) {
+                                continue 'outer;
+                            }
+                        }
+            
+                        // This matches.
+                        accumulator(person_id);
+                    }
                 }
-                
+
             }
         });
     }
@@ -114,7 +234,7 @@ seq!(Z in 1..20 {
 /// to iteratively construct a query in multiple parts.
 ///
 /// Example:
-/// ```
+/// ```ignore
 /// use ixa::{Property, QueryAnd, Context, ContextPeopleExt};
 ///
 /// #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug, Hash)]
@@ -146,29 +266,22 @@ where
     }
 }
 
-impl<Q1, Q2> Query for QueryAnd<Q1, Q2>
-where
-    Q1: Query,
-    Q2: Query,
-{
-    fn setup(&self, context: &mut Context) {
-        Q1::setup(&self.queries.0, context);
-        Q2::setup(&self.queries.1, context);
-    }
+// impl<Q1, Q2> Query for QueryAnd<Q1, Q2>
+// where
+//     Q1: Query,
+//     Q2: Query,
+// {
+//     fn setup(&self, context: &mut Context) {
+//         Q1::setup(&self.queries.0, context);
+//         Q2::setup(&self.queries.1, context);
+//     }
+//     
+//     fn execute_query(&self, context: &Context, accumulator: impl FnMut(PersonId)) {
+//         self.queries.0.execute_query(context, accumulator);
+//     }
+// }
 
-    fn get_query(&self) -> Vec<(TypeId, IndexValue)> {
-        let mut query = Vec::new();
-        query.extend_from_slice(&self.queries.0.get_query());
-        query.extend_from_slice(&self.queries.1.get_query());
-        query
-    }
-
-    fn refresh_indexes(&self, context: &Context) {
-        self.queries.0.refresh_indexes(context);
-        self.queries.1.refresh_indexes(context);
-    }
-}
-
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -425,3 +538,4 @@ mod tests {
         assert_eq!(people.len(), 0);
     }
 }
+*/

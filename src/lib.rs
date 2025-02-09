@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod any_map;
 mod context;
 mod new_trait;
