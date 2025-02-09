@@ -1,10 +1,11 @@
-use crate::context::Context;
-use crate::people::PeopleData;
-use crate::property::Property;
-use crate::{PersonId, type_of};
+use crate::{
+    property::Property,
+    people::PeopleData,
+    PersonId,
+    type_of,
+    TypeId
+};
 use seq_macro::seq;
-use crate::any_map::AnyMap;
-use crate::TypeId;
 
 /// A trait that contains the initialization values for a
 /// new person. Do not use this directly, but instead use
@@ -29,10 +30,6 @@ impl<T1: Property> InitializationList for T1 {
 
     fn set_properties(self, people_data: &mut PeopleData, person_id: PersonId) {
         people_data.set_property::<T1>(person_id, self);
-    }
-    
-    fn check_initialization_list(&self, properties_map: &AnyMap) {
-        properties_map.get_vec_ref::<T1>()
     }
 }
 

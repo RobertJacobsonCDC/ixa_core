@@ -1,11 +1,6 @@
-use crate::{
-    context::Context,
-    people::ContextPeopleExt,
-    PersonId,
-    property::Property,
-    type_of,
-    TypeId,
-};
+// ToDo: Make this module generic over entity instead of specific to `PeopleId`
+
+use crate::{context::Context, people::ContextPeopleExt, PersonId, property::Property, type_of, TypeId, define_any_map_container};
 use std::{
     any::Any,
     collections::{HashMap, HashSet},
@@ -61,9 +56,9 @@ impl Hasher for IndexValueHasher {
 }
 
 // An index for a single property.
-pub(crate) struct IndexCore<T: Property> {
+pub(crate) struct Index<T: Property> {
     // The hash of the property value maps to a list of PersonIds
-    // or None if we're not indexing
+    // or None if we're not indexing.
     pub(super) lookup: Option<HashMap<IndexValue, HashSet<PersonId>>>,
 
     // The largest person ID that has been indexed. Used so that we
@@ -73,7 +68,7 @@ pub(crate) struct IndexCore<T: Property> {
     phantom: PhantomData<T>,
 }
 
-impl<T: Property> IndexCore<T> {
+impl<T: Property> Index<T> {
     pub(super) fn new() -> Self {
         Self {
             lookup: None,
@@ -81,19 +76,10 @@ impl<T: Property> IndexCore<T> {
             phantom: PhantomData::default(),
         }
     }
-}
 
-
-// The pub(crate) interface to `IndexCore<T>`
-pub(crate) trait Index: Any {
-    fn add_person(&mut self, context: &mut Context, person_id: PersonId);
-    fn remove_person(&mut self, context: &mut Context, person_id: PersonId);
-    fn index_unindexed_people(&mut self, context: &mut Context);
-}
-
-impl<T: Property> Index for IndexCore<T> {
-
-    fn add_person(&mut self, context: &mut Context, person_id: PersonId) {
+    /// Looks up the value of the `T` property for `person_id` and adds `person_id` to the index 
+    /// set for that `value`.
+    fn add_person(&mut self, context: &Context, person_id: PersonId) {
         let value = context.get_person_property::<T>(person_id).clone();
         let value = value.unwrap_or_else(|| {
             // ToDo: This is what Ixa does, but it seems like we'd want to be able to query for people who do not have
@@ -105,15 +91,12 @@ impl<T: Property> Index for IndexCore<T> {
             );
         });
 
-        let hash = IndexValue::new(&value);
-        self.lookup
-            .as_mut()
-            .unwrap()
-            .entry(hash)
-            .or_insert_with(HashSet::new)
-            .insert(person_id);
+        let index_value = IndexValue::new(&value);
+        self.insert((person_id, index_value));
     }
 
+    /// Looks up the value of the `T` property for `person_id` and removes `person_id` from the 
+    /// index set for that `value`. 
     fn remove_person(&mut self, context: &mut Context, person_id: PersonId) {
         let value = context.get_person_property::<T>(person_id);
         // ToDo: If we index `None` values, we'd have to remove for None, too
@@ -131,7 +114,7 @@ impl<T: Property> Index for IndexCore<T> {
         }
     }
 
-    fn index_unindexed_people(&mut self, context: &mut Context) {
+    pub(crate) fn index_unindexed_people(&mut self, context: &Context) {
         if self.lookup.is_none() {
             return;
         }
@@ -142,36 +125,83 @@ impl<T: Property> Index for IndexCore<T> {
         }
         self.max_indexed = current_pop;
     }
+    
+    /// Inserts the `person_id` into the index set for the given index value.
+    fn insert(&mut self, (person_id, index_value): (PersonId, IndexValue)) {
+        self.lookup
+            .as_mut()
+            .unwrap()
+            .entry(index_value)
+            .or_insert_with(HashSet::new)
+            .insert(person_id);
+    }
 }
 
-/// A map from `TypeId` to `Index<T>`. This follows the `AnyMap` pattern. This is what `PeopleData` uses to
-/// look up `Index`es.
-pub(crate) struct IndexMap {
-    /// This is actually a HashMap<TypeId, Box<IndexCore<T>>>
+
+// We don't use the `define_any_map_container!` macro, because the insert method inserts a 
+// `(PersonId, IndexValue)`, not a `T: Property`.
+// define_any_map_container!(
+//     IndexMap,
+//     Index<T: Property>,
+//     Index::<T>::new(),
+//     Index::<T>::insert
+// );
+
+pub struct IndexMap {
     map: HashMap<TypeId, Box<dyn Any>>,
 }
 
+impl Default for IndexMap{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IndexMap {
-    pub fn insert<T: Property>(&mut self, index: IndexCore<T>) {
+    #[inline]
+    pub fn new() -> IndexMap {
+        IndexMap {
+            map: HashMap::new(),
+        }
+    }
+
+    #[inline]
+    pub fn insert<T: Property>(&mut self, index: Index<T>) {
         self.map
             .insert(type_of::<T>(), Box::new(index))
             .expect("failed to insert type Index into IndexMap");
     }
 
-    #[must_use]
-    pub fn get<T: Property>(&self) -> Option<&IndexCore<T>> {
-        let index = self.map.get(&type_of::<T>());
-        // ToDo: Use `Any::downcast_ref_unchecked`. The following is guaranteed safe, as only an
-        //       `IndexCore<T>` is mapped to by `type_of::<T>()`.
-        index.map(|any| any.downcast_ref::<IndexCore<T>>().unwrap())
+    #[inline]
+    pub fn get_container_mut<T: Property + 'static>(&mut self) -> &mut Index<T> {
+        unsafe {
+            self.map
+                .entry(type_of::<T>())
+                .or_insert_with(|| Box::new((Index::<T>::new())))
+                .downcast_mut()
+                .unwrap_unchecked()
+        }
     }
 
-    #[must_use]
-    pub fn get_mut<T: Property>(&mut self) -> Option<&mut IndexCore<T>> {
-        let index = self.map.get_mut(&type_of::<T>());
-        // ToDo: Use `Any::downcast_mut_unchecked`. The following is guaranteed safe, as only an
-        //       `IndexCore<T>` is mapped to by `type_of::<T>()`.
-        index.map(|any| any.downcast_mut::<IndexCore<T>>().unwrap() )
+    #[inline]
+    pub fn get_container_ref<T: Property + 'static>(&self) -> Option<&Index<T>> {
+        self.map
+            .get(&type_of::<T>())
+            .map(|v|
+                unsafe {
+                    v.downcast_ref()
+                        .unwrap_unchecked()
+                }
+            )
+    }
+
+    #[inline]
+    pub unsafe fn get_container_ref_unchecked<T: Property + 'static>(&self) -> &Index<T> {
+        self.map
+            .get(&type_of::<T>())
+            .unwrap_unchecked()
+            .downcast_ref()
+            .unwrap_unchecked()
     }
 }
 

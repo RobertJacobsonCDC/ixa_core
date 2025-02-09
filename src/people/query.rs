@@ -1,13 +1,17 @@
+/*!
+
+ToDo: Make this generic over entity.
+
+*/
+
 use seq_macro::seq;
 
-use crate::{
-    TypeId,
-    context::Context,
-    index::IndexValue,
-    people::ContextPeopleExt,
-    property::Property,
-    type_of,
-};
+use crate::{TypeId, context::Context, people::{
+    IndexValue,
+    ContextPeopleExt
+}, property::Property, type_of, PersonId};
+use crate::people::index::IndexMap;
+use crate::people::PeopleData;
 
 /// Encapsulates a person query.
 ///
@@ -15,16 +19,24 @@ use crate::{
 /// we implement Query for tuples of up to size 20, that's invisible
 /// to the caller. Do not use this trait directly.
 pub trait Query {
-    fn setup(&self, context: &Context);
+    /// Registers each property in the query with the context.
+    fn setup(&self, context: &mut Context);
+    /// Construct a vector of pairs of (property type id, value hash) for this query.
     fn get_query(&self) -> Vec<(TypeId, IndexValue)>;
+    /// The query refreshes the index of each property to which it refers.
+    fn refresh_indexes(&self, context: &Context);
+    /// Executes the query, accumulating the results with `accumulator`.
+    fn execute_query(&self, context: &Context, accumulator: impl FnMut(PersonId));
 }
 
 impl Query for () {
-    fn setup(&self, _: &Context) {}
+    fn setup(&self, _: &mut Context) {}
 
     fn get_query(&self) -> Vec<(TypeId, IndexValue)> {
         vec![]
     }
+
+    fn refresh_indexes(&self, _context: &Context) {}
 }
 
 // Implement the query version with one parameter.
@@ -35,6 +47,16 @@ impl<T1: Property> Query for T1 {
 
     fn get_query(&self) -> Vec<(TypeId, IndexValue)> {
         vec![(type_of::<T1>(), IndexValue::new(&self))]
+    }
+    
+    fn refresh_indexes(&self, context: &Context) {
+        let mut index_map = context.get_data_container::<PeopleData>()
+            .unwrap()
+            .property_indexes
+            .borrow_mut();
+        
+        let index = index_map.get_container_mut::<T1>();
+        index.index_unindexed_people(context)
     }
 }
 
@@ -52,7 +74,7 @@ macro_rules! impl_query {
                 )*
             )
             {
-                fn setup(&self, context: &Context) {
+                fn setup(&self, context: &mut Context) {
                     #(
                         context.register_property::<T~N>();
                     )*
@@ -61,10 +83,24 @@ macro_rules! impl_query {
                 fn get_query(&self) -> Vec<(TypeId, IndexValue)> {
                     vec![
                     #(
-                        (type_of::<T~N>(), IndexValue::compute(&self.N)),
+                        (type_of::<T~N>(), IndexValue::new(&self.N)),
                     )*
                     ]
                 }
+                
+                fn refresh_indexes(&self, context: &Context) {
+                    let mut index_map = context.get_data_container::<PeopleData>()
+                        .unwrap()
+                        .property_indexes
+                        .borrow_mut();
+                #(
+                    {
+                        let index = index_map.get_container_mut::<T~N>();
+                        index.index_unindexed_people(context);
+                    }
+                )*
+                }
+                
             }
         });
     }
@@ -115,7 +151,7 @@ where
     Q1: Query,
     Q2: Query,
 {
-    fn setup(&self, context: &Context) {
+    fn setup(&self, context: &mut Context) {
         Q1::setup(&self.queries.0, context);
         Q2::setup(&self.queries.1, context);
     }
@@ -125,6 +161,11 @@ where
         query.extend_from_slice(&self.queries.0.get_query());
         query.extend_from_slice(&self.queries.1.get_query());
         query
+    }
+
+    fn refresh_indexes(&self, context: &Context) {
+        self.queries.0.refresh_indexes(context);
+        self.queries.1.refresh_indexes(context);
     }
 }
 

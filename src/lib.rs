@@ -1,10 +1,8 @@
-pub mod any_map;
+mod any_map;
 mod context;
-mod init_list;
 mod new_trait;
 mod people;
 mod property;
-mod query;
 mod property_map;
 mod error;
 

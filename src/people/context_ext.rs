@@ -1,22 +1,30 @@
-use std::cell::Ref;
-use std::collections::HashSet;
-use typeid::of as type_of;
+use std::{
+    cell::Ref,
+    collections::HashSet
+};
 use crate::{
-    IxaError,
-    PersonId,
-    TypeId,
     context::Context,
-    index::{Index, IndexValue},
-    init_list::InitializationList,
-    people::people_data::PeopleData,
-    property::{DerivedProperty, Property},
-    query::Query,
+    error::IxaError,
+    people::{
+        Index,
+        IndexValue,
+        InitializationList,
+        PeopleData,
+        Query
+    },
+    PersonId,
+    property::{
+        DerivedProperty, 
+        Property
+    },
+    TypeId,
+    type_of,
 };
 
 pub trait ContextPeopleExt {
     fn get_current_population(&self) -> usize;
     fn add_person<T: InitializationList>(&mut self, properties: T) -> Result<PersonId, IxaError>;
-    
+
     fn get_person_property<T: Property>(&self, person_id: PersonId) -> &Option<T>;
     fn get_person_property_mut<T: Property>(&mut self, person_id: PersonId) -> &mut Option<T>;
     fn get_person_property_or_default<T: Property>(
@@ -24,11 +32,11 @@ pub trait ContextPeopleExt {
         person_id: PersonId,
         default: T,
     ) -> &mut T;
-    
+
     fn set_person_property<T: Property>(&mut self, person_id: PersonId, value: T);
-    
-    fn query_people<T: Query>(&self, q: T) -> Vec<PersonId>;
-    
+
+    fn query_people<T: Query>(&mut self, q: T) -> Vec<PersonId>;
+
     /// Registers the type with `PeopleData`
     fn register_property<T: Property>(&mut self);
 }
@@ -99,6 +107,18 @@ impl ContextPeopleExt for Context {
         *property = Some(value);
     }
 
+    fn query_people<T: Query>(&mut self, q: T) -> Vec<PersonId> {
+        T::setup(&q, self);
+        let mut result = Vec::new();
+        self.query_people_internal(
+            |person| {
+                result.push(person);
+            },
+            &q,
+        );
+        result
+    }
+
     fn register_property<T: Property>(&mut self) {
         T::register(self);
     }
@@ -109,11 +129,7 @@ pub(crate) trait ContextPeopleExtInternal {
     fn register_indexer<T: Property>(&mut self);
     fn add_to_index_maybe<T: Property>(&mut self, person_id: PersonId, property: T);
     fn remove_from_index_maybe<T: Property>(&mut self, person_id: PersonId);
-    fn query_people_internal(
-        &mut self,
-        accumulator: impl FnMut(PersonId),
-        property_hashes: Vec<(TypeId, IndexValue)>,
-    );
+    fn query_people_internal<Q: Query>(&mut self, accumulator: impl FnMut(PersonId), query: Q);
     /// Registers the type with all of its dependencies and then registers
     fn register_derived_property<T: DerivedProperty>(&mut self);
     fn register_nonderived_property<T: Property>(&mut self);
@@ -121,28 +137,44 @@ pub(crate) trait ContextPeopleExtInternal {
 
 impl ContextPeopleExtInternal for Context {
     fn register_indexer<T: Property>(&mut self) {
-        let people_data = self.get_data_container_mut::<PeopleData>();
+        let property_indexes = self.get_data_container_mut::<PeopleData>().property_indexes.get_mut();
         let type_id = type_of::<T>();
 
         // This method should only be called during initial Property registration.
-        assert!(!people_data.property_indexes.contains_key(&type_id));
-        people_data
-            .property_indexes
-            .insert(type_id, Box::new(Index::<T>::new()));
+        assert!(!property_indexes.contains_key(&type_id));
+        property_indexes.insert(Index::<T>::new());
     }
 
     /// Executes the query, accumulating the results with `accumulator`.
-    fn query_people_internal(&mut self, accumulator: impl FnMut(PersonId), property_hashes: Vec<(TypeId, IndexValue)>) {
+    fn query_people_internal<Q: Query>(&mut self, accumulator: impl FnMut(PersonId), query: Q) {
         let mut indexes = Vec::<Ref<HashSet<PersonId>>>::new();
         let mut unindexed = Vec::<(TypeId, IndexValue)>::new();
-        let data_container = self.get_data_container_mut::<PeopleData>();
 
-        // 1. Walk through each property and update the indexes.
-        for (t, _) in &property_hashes {
-            let mut index = data_container.get_index_ref_mut(*t).unwrap();
-            let methods = data_container.get_methods(*t);
-            index.index_unindexed_people(self, &methods);
+        // 1. Refresh the indexes for each property in the query.
+        query.refresh_indexes(self);
+        
+        // 2. Collect the index entry corresponding to the value.
+        // let property_hashes = query.get_query();
+        // let people_data = self.get_data_container::<PeopleData>();
+        
+        for (t, hash) in property_hashes {
+            let index = people_data.get_index_ref(t).unwrap();
+            if let Ok(lookup) = Ref::filter_map(index, |x| x.lookup.as_ref()) {
+                if let Ok(matching_people) =
+                    Ref::filter_map(lookup, |x| x.get(&hash).map(|entry| &entry.1))
+                {
+                    indexes.push(matching_people);
+                } else {
+                    // This is empty and so the intersection will
+                    // also be empty.
+                    return;
+                }
+            } else {
+                // No index, so we'll get to this after.
+                unindexed.push((t, hash));
+            }
         }
+
     }
 
     /// Registers the type with all of its dependencies and then registers an index for the type.
@@ -166,15 +198,16 @@ impl ContextPeopleExtInternal for Context {
 
     fn register_nonderived_property<T: Property>(&mut self) {
         let people_data = self.get_data_container_mut::<PeopleData>();
-        let type_id = type_of::<T>();
+        let property_info =T::property_info();
 
         people_data
-            .people_types
-            .insert(T::name().to_string(), type_id);
-        people_data
             .registered_derived_properties
-            .push(type_id);
-        
+            .push(property_info.type_id());
+        people_data
+            .property_metadata
+            .push(property_info);
+
         self.register_indexer::<T>();
     }
+
 }

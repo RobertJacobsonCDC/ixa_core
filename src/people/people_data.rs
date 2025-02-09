@@ -1,28 +1,32 @@
-use std::any::{Any, TypeId};
-use std::cell::RefMut;
-use std::collections::HashMap;
-use crate::any_map::AnyMap;
-use crate::init_list::InitializationList;
-use crate::{New, PersonId};
-use crate::error::IxaError;
-use crate::people::index::Index;
-use crate::property::Property;
-use crate::property_map::{PropertyMap, PropertyStore};
+use std::{
+    any::{Any, TypeId},
+    cell::{RefCell},
+    collections::HashMap
+};
+use crate::{
+    New,
+    PersonId,
+    error::IxaError,
+    people::{Index, IndexMap, InitializationList},
+    property::{Property, PropertyInfo},
+    property_map::{PropertyMap, PropertyStore}
+};
 
 /// Stores all data associated to people and their properties.
 pub(crate) struct PeopleData {
     // pub(super) is_initializing: bool,
     pub(crate) current_population: usize,
-    // Map from type `T: Property` to `PropertyStore`, a wrapper for `Vec<Option<T>>` 
+    /// Map from type `T: Property` to `PropertyStore`, a wrapper for `Vec<Option<T>>`
     pub(crate) properties_map: PropertyMap,
-    // Records which types have been registered with all of their dependencies in `dependency_map`
+    /// Records which types have been registered with all of their dependencies in `dependency_map`
     pub(crate) registered_derived_properties: Vec<TypeId>,
-    // Maps dependencies to types that depend on them
+    /// Maps dependencies to types that depend on them
     pub(crate) dependency_map: HashMap<TypeId, Vec<TypeId>>,
-    // This is actually a `HashMap<TypeId, Index>`
-    pub(crate) property_indexes: HashMap<TypeId, Box<dyn Any>>,
-    // Maps the name of a property to the property's `TypeId`
-    pub(crate) people_types: HashMap<String, TypeId>,
+    /// This is actually a `HashMap<TypeId, IndexCore<T: Property>`
+    pub(crate) property_indexes: RefCell<IndexMap>,
+    /// A database of basic information about registered properties:
+    ///     `PropertyInfo(Name, TypeId, IsRequired, IsDerived)`
+    pub(crate) property_metadata: Vec<PropertyInfo>,
 }
 
 impl Default for PeopleData {
@@ -32,8 +36,8 @@ impl Default for PeopleData {
             properties_map: PropertyMap::new(),
             registered_derived_properties: vec![],
             dependency_map: HashMap::new(),
-            property_indexes: Default::default(),
-            people_types: Default::default(),
+            property_indexes: RefCell::new(IndexMap::default()),
+            property_metadata: vec![],
         }
     }
 }
@@ -79,34 +83,30 @@ impl PeopleData {
         let property = self.get_person_property_mut(person_id);
         *property = Some(value);
     }
-    
-    pub fn get_index_mut(&mut self, type_id: TypeId) -> Option<&mut dyn Index> {
+
+    pub fn get_index_mut<T: Property>(&mut self) -> &mut Index<T> {
         self.property_indexes
-            .get_mut(&type_id)
-            .map(|idx| {
-                idx.downcast_mut::<Box<dyn Index>>()
-                    .unwrap()
-                    .as_mut()
-            })
+            .get_mut()
+            .get_container_mut::<T>()
+            // .map(|idx| {
+            //     idx.downcast_mut::<Box<Index<T>>>()
+            //         .unwrap()
+            //         .as_mut()
+            // })
     }
 
-    pub fn get_index_ref(&mut self, type_id: TypeId) -> Option<&dyn Index> {
+    pub fn get_index_ref<T: Property>(&mut self) -> Option<&Index<T>> {
         self.property_indexes
-            .get(&type_id)
-            .map(|idx| {
-                idx.downcast_ref::<Box<dyn Index>>()
-                    .unwrap()
-                    .as_ref()
-            })
+            .get_mut()
+            .get_container_ref::<T>()
     }
 
-    pub(super) fn check_initialization_list<T: InitializationList>(
-        &self,
-        initialization: &T,
-    ) -> Result<(), IxaError> {
-        for (t, property) in self.properties_map.iter() {
-            if property.is_required && !initialization.has_property(*t) {
-                return Err(IxaError::IxaError(String::from("Missing initial value")));
+    pub(super) fn check_initialization_list<T: InitializationList>(&self, initialization: &T)
+        -> Result<(), IxaError>
+    {
+        for property_info in self.property_metadata.iter() {
+            if property_info.is_required() && !initialization.has_property(property_info.type_id()) {
+                return Err(IxaError::IxaError(format!("Missing initial value {}", property_info.name())));
             }
         }
 

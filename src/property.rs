@@ -1,13 +1,41 @@
-use crate::{
-    context::Context,
-    PersonId,
-    people::ContextPeopleExt,
-};
+use crate::{context::Context, PersonId, people::ContextPeopleExtInternal, type_of};
 use std::{
-    any::TypeId,
+    any::{
+        TypeId,
+        type_name
+    },
     fmt::Debug,
-    hash::Hash
+    hash::Hash,
 };
+
+/// Basic metadata about a property, a record in a property metadata database:
+///     `(Name, TypeId, IsRequired, IsDerived)`
+pub(crate) struct PropertyInfo(pub String, pub TypeId, pub bool, pub bool);
+impl PropertyInfo {
+    #[must_use]
+    #[inline(always)]
+    pub fn name(&self) -> &str {
+        self.0.as_str()
+    }
+
+    #[must_use]
+    #[inline(always)]
+    pub fn type_id(&self) -> TypeId {
+        self.1
+    }
+    
+    #[must_use]
+    #[inline(always)]
+    pub fn is_required(&self) -> bool {
+        self.2
+    }
+    
+    #[must_use]
+    #[inline(always)]
+    pub fn is_derived(&self) -> bool {
+        self.3
+    }
+}
 
 pub trait Property: Clone + Debug + PartialEq + Hash + 'static {
     // #[must_use]
@@ -16,26 +44,41 @@ pub trait Property: Clone + Debug + PartialEq + Hash + 'static {
     // }
 
     #[must_use]
+    #[inline]
     fn name() -> &'static str {
-        std::any::type_name::<Self>()
+        type_name::<Self>()
+    }
+
+    #[must_use]
+    #[inline]
+    fn is_required() -> bool {
+        false
     }
 
     /// Overridden by `DerivedProperty`s, because they also need to register dependencies.
+    #[inline]
     fn register(context: &mut Context) {
         context.register_nonderived_property::<Self>();
     }
 
     /// Adds all nonderived dependencies of `Self` to `dependencies`, ***including `Self`***
     /// if `Self` is nonderived.
+    #[inline]
     fn collect_dependencies(dependencies: &mut Vec<TypeId>){
         dependencies.push(crate::type_of::<Self>());
+    }
+    
+    #[must_use]
+    #[inline]
+    fn property_info() -> PropertyInfo {
+        PropertyInfo(Self::name().to_string(), type_of::<Self>(), Self::is_required(), false)
     }
 }
 
 pub trait DerivedProperty: Property {
     /// Computes this property value.
-    // ToDo: This could be implemented for all `Property`s by just looking up the value of the property for
-    //       nonderived properties.
+    // ToDo: This could be implemented for all `Property`s by just looking up the value of the 
+    //       property for nonderived properties.
     #[must_use]
     fn compute(context: &Context, person_id: PersonId) -> Self;
 }
@@ -46,7 +89,14 @@ pub trait DerivedProperty: Property {
 #[derive(Debug, Copy, Clone)]
 pub struct DerivedPropertyName(bool);
 
-// define_derived_property!(DerivedPropertyName, [PersonProperty1, PersonProperty2], [GlobalProperty1, GlobalProperty2], |pprop1, pprop2, gprop1, gprop2| { DerivedPropertyName(pprop1.0 >= gprop2.0) });
+define_derived_property!(
+    DerivedPropertyName, 
+    [PersonProperty1, PersonProperty2], 
+    [GlobalProperty1, GlobalProperty2], 
+    |pprop1, pprop2, gprop1, gprop2| { 
+        DerivedPropertyName(pprop1.0 >= gprop2.0) 
+    }
+);
 */
 
 /// Defines a derived person property with the following parameters:
@@ -77,6 +127,15 @@ macro_rules! define_derived_property {
                 $(
                     $dependency::collect_dependencies(dependencies);
                 )*
+            }
+            
+            fn property_info() -> $crate::property::PropertyInfo {
+                $crate::property::PropertyInfo(
+                    Self::name().to_string(), 
+                    type_of::<Self>(), 
+                    Self::is_required(), 
+                    true
+                )
             }
         }
 

@@ -33,8 +33,8 @@ impl<T: Property> PropertyStore<T> {
 }
 
 define_any_map_container!(
-    PropertyMap, 
-    PropertyStore<T: Property>, 
-    PropertyStore::<T>::new(), 
+    PropertyMap,
+    PropertyStore<T: Property>,
+    PropertyStore::<T>::new(),
     PropertyStore::push
 );
