@@ -4,8 +4,8 @@ use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
 pub struct Context {
-    // This is actually a `HashMap<TypeId, Box<dyn New>>` but must be declared this way to avoid having to implement
-    // an `as_any()` method on everything, at least as far as I know.
+    // This is actually a `HashMap<TypeId, Box<dyn New>>` but must be declared this way to avoid 
+    // having to implement an `as_any()` method on everything, at least as far as I know.
     data_plugins: HashMap<TypeId, Box<dyn Any>>,
 }
 

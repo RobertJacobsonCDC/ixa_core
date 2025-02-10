@@ -1,9 +1,12 @@
-use crate::{context::Context, PersonId, people::ContextPeopleExtInternal, type_of};
+use crate::{
+    context::Context, 
+    PersonId, 
+    people::ContextPeopleExtInternal, 
+    TypeId,
+    type_of,
+};
 use std::{
-    any::{
-        TypeId,
-        type_name
-    },
+    any::type_name,
     fmt::Debug,
     hash::Hash,
 };

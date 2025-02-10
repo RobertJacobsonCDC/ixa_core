@@ -41,7 +41,7 @@ impl<T1: Property> Query for T1 {
     fn setup(&self, context: &mut Context) {
         context.register_property::<T1>();
     }
-    
+
     fn execute_query(&self, context: &Context, mut accumulator: impl FnMut(PersonId)){
         let people_data = context.get_data_container::<PeopleData>().unwrap();
         let mut index_map = people_data.property_indexes.borrow_mut();
@@ -137,14 +137,14 @@ macro_rules! impl_query {
                         context.register_property::<T~N>();
                     )*
                 }
-                
+
                 fn execute_query(&self, context: &Context, mut accumulator: impl FnMut(PersonId)) {
                     let people_data = context.get_data_container::<PeopleData>().unwrap();
                     let mut index_map = people_data.property_indexes.borrow_mut();
                     let mut indexes: Vec<&HashSet<PersonId>> = Vec::new();
                     // A vector of closures that look up a property for a `person_id`
                     let mut unindexed: Vec<Box<dyn Fn(&PeopleData, PersonId) -> bool>> = Vec::new();
-                    
+
                 #(
                     {
                         // 1. Refresh the indexes for each property in the query.
@@ -197,7 +197,7 @@ macro_rules! impl_query {
                             }
                             Box::new(indexes.remove(shortest_idx).iter().cloned())
                         };
-            
+
                     // 4. Walk over the iterator and add people to the result iff:
                     //    (1) they exist in all the indexes
                     //    (2) they match the unindexed properties
@@ -208,14 +208,14 @@ macro_rules! impl_query {
                                 continue 'outer;
                             }
                         }
-            
+
                         // (2) check the unindexed properties
                         for hash_lookup in &unindexed {
                             if !hash_lookup(people_data, person_id) {
                                 continue 'outer;
                             }
                         }
-            
+
                         // This matches.
                         accumulator(person_id);
                     }
@@ -235,7 +235,7 @@ seq!(Z in 1..20 {
 ///
 /// Example:
 /// ```ignore
-/// use ixa::{Property, QueryAnd, Context, ContextPeopleExt};
+/// use ixa_properties::{Property, QueryAnd, Context, ContextPeopleExt};
 ///
 /// #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug, Hash)]
 /// struct Age(u8);
@@ -275,7 +275,7 @@ where
 //         Q1::setup(&self.queries.0, context);
 //         Q2::setup(&self.queries.1, context);
 //     }
-//     
+//
 //     fn execute_query(&self, context: &Context, accumulator: impl FnMut(PersonId)) {
 //         self.queries.0.execute_query(context, accumulator);
 //     }
