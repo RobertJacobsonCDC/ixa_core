@@ -13,7 +13,7 @@ is it needs to be `'static` or a value type. (Note that such a type automaticall
 The syntax is identical to calling a `new()` constructor on any other type:
 
 ```rust
-# use ixa_properties::New;
+# use ixa_core::New;
 
 struct MyStruct {
   a: u32,
@@ -34,7 +34,7 @@ If your type already has a `new()` method, implementing `New` is a cinch, but yo
 to do the standard ceremony for calling `New::new()` when there's a name collision:
 
 ```rust
-# use ixa_properties::New;
+# use ixa_core::New;
 struct MyStruct {
   a: u32,
   b: &'static str

@@ -13,7 +13,7 @@ use std::{
 
 /// Basic metadata about a property, a record in a property metadata database:
 ///     `(Name, TypeId, IsRequired, IsDerived)`
-pub(crate) struct PropertyInfo(pub String, pub TypeId, pub bool, pub bool);
+pub struct PropertyInfo(pub String, pub TypeId, pub bool, pub bool);
 impl PropertyInfo {
     #[must_use]
     #[inline(always)]

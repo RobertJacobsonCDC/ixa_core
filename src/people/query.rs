@@ -235,7 +235,7 @@ seq!(Z in 1..20 {
 ///
 /// Example:
 /// ```ignore
-/// use ixa_properties::{Property, QueryAnd, Context, ContextPeopleExt};
+/// use ixa_core::{Property, QueryAnd, Context, ContextPeopleExt};
 ///
 /// #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug, Hash)]
 /// struct Age(u8);

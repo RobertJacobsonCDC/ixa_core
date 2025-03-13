@@ -1,11 +1,41 @@
-[package]
-name = "ixa_properties"
+[workspace]
+resolver = "3"
+members  = [
+#    "examples/disease_model"
+]
+
+[workspace.package]
+authors = ["Robert Jacobson <rjacobson@cdc.gov>"]
 version = "0.1.0"
 edition = "2024"
+publish = false
+
+[workspace.dependencies]
+# Workspace Dependencies
+ixa-core = { path = "." }
+
+# Ixa Core dependencies
+log        = "^0.4.26"
+log4rs     = "1.3.0"
+rand       = "^0.9.0"
+rustc-hash = "^2.1.1"
+seq-macro  = "^0.3.6"
+serde      = { version = "^1.0.219", features = ["derive"] }
+
+# Other dependencies
+csv        = "1.3.1"
+rand_distr = "0.5.1"
+
+
+[package]
+name = "ixa-core"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
-#typeid = "1.0.2"
-seq-macro = "^0.3.5"
-log = "^0.4.25"
-log4rs = "1.3.0"
-rand = "^0.8.5"
+log.workspace        = true
+log4rs.workspace     = true
+rand.workspace       = true
+rustc-hash.workspace = true
+seq-macro.workspace  = true

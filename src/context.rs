@@ -3,6 +3,17 @@ use crate::type_of;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
+
+pub trait DataPlugin: 'static {
+    /// A constant reference to a constructor
+    #[allow(non_upper_case_globals)]
+    const new: &'static dyn Fn() -> Self;
+}
+impl<T: DataPlugin> New for T {
+    const new: &'static dyn Fn() -> Self = DataPlugin::new;
+}
+
+
 pub struct Context {
     // This is actually a `HashMap<TypeId, Box<dyn New>>` but must be declared this way to avoid 
     // having to implement an `as_any()` method on everything, at least as far as I know.
@@ -18,11 +29,13 @@ impl Context {
 
     /// Returns a mutable reference for the data container for `T`, creating it if it doesn't exist yet.
     pub fn get_data_container_mut<T: New>(&mut self) -> &mut T {
-        self.data_plugins
-            .entry(type_of::<T>())
-            .or_insert_with(|| Box::new(<T as New>::new()))
-            .downcast_mut::<T>()
-            .unwrap() // Will never panic as data container has the matching type
+        let container = self.data_plugins
+                            .entry(type_of::<T>())
+                            .or_insert_with(|| Box::new(<T as New>::new()))
+                            .downcast_mut::<T>();
+        // Will never panic as data container has the matching type
+        unsafe{ container.unwrap_unchecked() }
+        
     }
 
     /// Returns a reference to the data container for `T` if it exists.

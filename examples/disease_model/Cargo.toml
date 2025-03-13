@@ -1,0 +1,13 @@
+[package]
+name    = "disease_model"
+description = "A basic SIR disease model using the Ixa agent-based modeling framework"
+authors = ["John Doe <jdoe@example.com>"]
+version = "0.1.0"
+edition = "2024"
+publish = false # Do not publish to the Crates.io registry
+
+[dependencies]
+csv.workspace        = true
+ixa-core.workspace   = true
+rand_distr.workspace = true
+serde.workspace      = true

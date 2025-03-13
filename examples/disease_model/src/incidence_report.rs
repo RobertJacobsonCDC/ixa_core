@@ -1,10 +1,6 @@
-use crate::infection_manager::InfectionStatusEvent;
-use crate::people::InfectionStatusValue;
-use ixa_properties::context::Context;
-use ixa_properties::error::IxaError;
-use ixa_properties::report::ContextReportExt;
-use ixa_properties::report::Report;
-use ixa_properties::{create_report_trait, trace, PersonId};
+use crate::{infection_manager::InfectionStatusEvent, people::InfectionStatusValue};
+use csv;
+use ixa_core::{Context, ContextReportExt, IxaError, PersonId, Report, create_report_trait, trace};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -19,10 +15,8 @@ create_report_trait!(IncidenceReportItem);
 
 fn handle_infection_status_change(context: &mut Context, event: InfectionStatusEvent) {
     trace!(
-        "Handling infection status change from {:?} to {:?} for {:?}",
-        event.previous,
-        event.current,
-        event.person_id
+        "Recording infection status change from {:?} to {:?} for {:?}",
+        event.previous, event.current, event.person_id
     );
     context.send_report(IncidenceReportItem {
         time: context.get_current_time(),
@@ -40,7 +34,7 @@ pub fn init(context: &mut Context) -> Result<(), IxaError> {
     // examples.
     context
         .report_options()
-        .directory(PathBuf::from("./examples/basic-infection/"))
+        .directory(PathBuf::from("../"))
         .overwrite(true);
     context.add_report::<IncidenceReportItem>("incidence")?;
     context.subscribe_to_event::<InfectionStatusEvent>(handle_infection_status_change);
