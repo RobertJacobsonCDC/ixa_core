@@ -39,3 +39,7 @@ log4rs.workspace     = true
 rand.workspace       = true
 rustc-hash.workspace = true
 seq-macro.workspace  = true
+
+
+[lints.clippy]
+wrong_self_convention = "allow"

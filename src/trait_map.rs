@@ -7,6 +7,7 @@ use std::{
   collections::HashMap
 };
 
+#[derive(Default)]
 pub struct TraitMap {
   map: HashMap<TypeId, Box<dyn Any>>,
 }

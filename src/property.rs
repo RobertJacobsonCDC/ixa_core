@@ -1,7 +1,7 @@
 use crate::{
-    context::Context, 
-    PersonId, 
-    people::ContextPeopleExtInternal, 
+    context::Context,
+    EntityId,
+    entity::ContextEntityExtInternal,
     TypeId,
     type_of,
 };
@@ -10,6 +10,7 @@ use std::{
     fmt::Debug,
     hash::Hash,
 };
+use crate::entity::EntityData;
 
 /// Basic metadata about a property, a record in a property metadata database:
 ///     `(Name, TypeId, IsRequired, IsDerived)`
@@ -26,13 +27,13 @@ impl PropertyInfo {
     pub fn type_id(&self) -> TypeId {
         self.1
     }
-    
+
     #[must_use]
     #[inline(always)]
     pub fn is_required(&self) -> bool {
         self.2
     }
-    
+
     #[must_use]
     #[inline(always)]
     pub fn is_derived(&self) -> bool {
@@ -41,10 +42,10 @@ impl PropertyInfo {
 }
 
 pub trait Property: Clone + Debug + PartialEq + Hash + 'static {
-    // #[must_use]
-    // fn is_derived() -> bool {
-    //     false
-    // }
+    #[must_use]
+    fn is_derived() -> bool {
+        false
+    }
 
     #[must_use]
     #[inline]
@@ -61,29 +62,30 @@ pub trait Property: Clone + Debug + PartialEq + Hash + 'static {
     /// Overridden by `DerivedProperty`s, because they also need to register dependencies.
     #[inline]
     fn register(context: &mut Context) {
-        context.register_nonderived_property::<Self>();
+        if !context.is_registered::<Self>(){
+            context.register_nonderived_property::<Self>();
+        }
     }
 
     /// Adds all nonderived dependencies of `Self` to `dependencies`, ***including `Self`***
     /// if `Self` is nonderived.
     #[inline]
     fn collect_dependencies(dependencies: &mut Vec<TypeId>){
-        dependencies.push(crate::type_of::<Self>());
+        dependencies.push(type_of::<Self>());
     }
-    
+
     #[must_use]
     #[inline]
     fn property_info() -> PropertyInfo {
         PropertyInfo(Self::name().to_string(), type_of::<Self>(), Self::is_required(), false)
     }
-}
 
-pub trait DerivedProperty: Property {
-    /// Computes this property value.
-    // ToDo: This could be implemented for all `Property`s by just looking up the value of the 
-    //       property for nonderived properties.
     #[must_use]
-    fn compute(context: &Context, person_id: PersonId) -> Self;
+    fn compute(context: &Context, entity_id: EntityId) -> Option<Self> {
+        context.get_data_container::<EntityData>()
+               .unwrap()
+               .get_property_ref(entity_id).cloned()
+    }
 }
 
 /*
@@ -93,11 +95,11 @@ pub trait DerivedProperty: Property {
 pub struct DerivedPropertyName(bool);
 
 define_derived_property!(
-    DerivedPropertyName, 
-    [PersonProperty1, PersonProperty2], 
-    [GlobalProperty1, GlobalProperty2], 
-    |pprop1, pprop2, gprop1, gprop2| { 
-        DerivedPropertyName(pprop1.0 >= gprop2.0) 
+    DerivedPropertyName,
+    [PersonProperty1, PersonProperty2],
+    [GlobalProperty1, GlobalProperty2],
+    |pprop1, pprop2, gprop1, gprop2| {
+        DerivedPropertyName(pprop1.0 >= gprop2.0)
     }
 );
 */
@@ -110,20 +112,25 @@ define_derived_property!(
 #[macro_export]
 macro_rules! define_derived_property {
     (
-        $derived_property:ty,
+        $derived_property:ident,
         [$($dependency:ident),*],
         [$($global_dependency:ident),*],
         |$($param:ident),+| $derive_fn:expr
     ) => {
         impl $crate::Property for $derived_property {
+            fn is_derived() -> bool {
+                true 
+            }
+            
             fn name() -> &'static str {
                 stringify!($derived_property)
             }
 
-            fn register(context: &$crate::Context) {
-                use $crate::people::ContextPeopleExt;
-
-                context.register_derived_property::<$derived_property>();
+            fn register(context: &mut $crate::Context) {
+                use $crate::entity::ContextEntityExtInternal;
+                if !context.is_registered::<Self>(){
+                    context.register_derived_property::<$derived_property>();
+                }
             }
 
             fn collect_dependencies(dependencies: &mut Vec<std::any::TypeId>) {
@@ -131,24 +138,23 @@ macro_rules! define_derived_property {
                     $dependency::collect_dependencies(dependencies);
                 )*
             }
-            
+
             fn property_info() -> $crate::property::PropertyInfo {
                 $crate::property::PropertyInfo(
-                    Self::name().to_string(), 
-                    type_of::<Self>(), 
-                    Self::is_required(), 
+                    Self::name().to_string(),
+                    $crate::type_of::<Self>(),
+                    Self::is_required(),
                     true
                 )
             }
-        }
 
-        impl $crate::DerivedProperty for $derived_property {
-            fn compute(context: &$crate::context::Context, person_id: $crate::PersonId) -> Self {
-                #[allow(unused_imports)]
-                use $crate::global_properties::ContextGlobalPropertiesExt;
+            fn compute(context: &$crate::context::Context, entity_id: $crate::EntityId) -> Option<Self> {
+                // #[allow(unused_imports)]
+                // use $crate::global_properties::ContextGlobalPropertiesExt;
                 #[allow(unused_parens)]
                 let ($($param,)*) = (
-                    $(context.get_person_property::<$dependency>(person_id).unwrap()),*,
+                    $(context.get_property_internal::<$dependency>(entity_id).unwrap()),*,
+                    
                     $(
                         *context.get_global_property_value::<$global_dependency>()
                             .unwrap_or_else(|| panic!(
@@ -156,6 +162,7 @@ macro_rules! define_derived_property {
                                 stringify!($global_dependency)
                             )),
                     )*
+                    
                 );
 
                 (|$($param),+| $derive_fn)($($param),+)
@@ -164,7 +171,7 @@ macro_rules! define_derived_property {
     };
 
     (
-        $derived_property:ty,
+        $derived_property:ident,
         [$($dependency:ident),*],
         |$($param:ident),+| $derive_fn:expr
     ) => {

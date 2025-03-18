@@ -1,6 +1,6 @@
 use rand_distr::Exp;
 
-use ixa_core::{Context, ContextPeopleExt, ContextRandomExt, PersonId, define_rng, trace};
+use ixa_core::{Context, ContextPeopleExt, ContextRandomExt, EntityId, define_rng, trace};
 
 use crate::FORCE_OF_INFECTION;
 use crate::MAX_TIME;
@@ -12,7 +12,7 @@ define_rng!(TransmissionRng);
 fn attempt_infection(context: &mut Context) {
     trace!("Attempting infection");
 
-    let person_to_infect: PersonId = context.sample_person(TransmissionRng, ()).unwrap();
+    let person_to_infect: EntityId = context.sample_person(TransmissionRng, ()).unwrap();
     let person_status: InfectionStatusValue =
         context.get_person_property(person_to_infect, InfectionStatus);
 

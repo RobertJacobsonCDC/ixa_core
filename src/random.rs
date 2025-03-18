@@ -29,7 +29,7 @@ pub trait RngId: Any  {
     #![allow(non_upper_case_globals)]
     const new: &'static dyn Fn(u64) -> Self;
     const name: &'static str;
-    type RngType: SeedableRng; 
+    type RngType: SeedableRng;
     fn rng(&mut self) -> &mut Self::RngType;
 }
 
@@ -48,7 +48,7 @@ impl RngPlugin {
     fn clear(&mut self) {
         self.rng_map.clear();
     }
-    
+
     pub fn get_rng<R: RngId>(&mut self) -> &mut R::RngType {
         if !self.rng_map.contains_key::<R>() {
             let base_seed = self.base_seed;
@@ -206,7 +206,7 @@ macro_rules! define_rng {
                     rng: $crate::rand::rngs::StdRng::seed_from_u64(seed),
                 }
             };
-            
+
             fn rng(&mut self) -> &mut Self::RngType {
                 &mut self.rng
             }
@@ -228,7 +228,7 @@ macro_rules! define_rng {
                     rng: <$rng_type>::seed_from_u64(seed),
                 }
             };
-            
+
             fn rng(&mut self) -> &mut Self::RngType {
                 &mut self.rng
             }
@@ -250,13 +250,14 @@ macro_rules! define_rng {
                     rng: <$rng_type>::seed_from_u64($seed),
                 }
             };
-            
+
             fn rng(&mut self) -> &mut Self::RngType {
                 &mut self.rng
             }
         }
     };
 }
+#[allow(unused_imports)]
 pub use define_rng;
 
 #[cfg(test)]
@@ -265,7 +266,7 @@ mod test {
     use crate::random::ContextRandomExt;
     use rand::RngCore;
     use rand::{distr::weighted::WeightedIndex, prelude::Distribution};
-    
+
     define_rng!(FooRng);
     define_rng!(BarRng);
 

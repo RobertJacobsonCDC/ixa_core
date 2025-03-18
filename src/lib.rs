@@ -3,7 +3,7 @@
 pub mod any_map;
 mod context;
 mod new_trait;
-mod people;
+mod entity;
 mod property;
 mod property_map;
 mod error;
@@ -22,7 +22,7 @@ pub use new_trait::New;
 
 pub use context::Context;
 pub use error::IxaError;
-pub use people::ContextPeopleExt;
+pub use entity::ContextEntityExt;
 pub use property::Property;
 pub use random::{ContextRandomExt, RngId};
 pub use log::{debug, error, info, trace, warn};
@@ -35,5 +35,5 @@ pub fn type_of<T: 'static>() -> TypeId {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
-pub struct PersonId(pub(crate) usize);
+pub struct EntityId(pub(crate) usize);
 

@@ -2,15 +2,16 @@
 
 use crate::{
     context::Context,
-    people::ContextPeopleExt,
+    entity::ContextEntityExt,
     property::Property,
     type_of,
-    PersonId,
-    TypeId
+    EntityId,
+    TypeId,
+    HashMap, 
+    HashSet
 };
 use std::{
     any::Any,
-    collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     marker::PhantomData,
 };
@@ -64,11 +65,11 @@ impl Hasher for IndexValueHasher {
 
 // An index for a single property.
 pub(crate) struct Index<T: Property> {
-    // The hash of the property value maps to a list of PersonIds or None if we're not indexing.
-    pub(super) lookup: Option<HashMap<IndexValue, HashSet<PersonId>>>,
+    // The hash of the property value maps to a list of EntityIds or None if we're not indexing.
+    pub(super) lookup: Option<HashMap<IndexValue, HashSet<EntityId>>>,
 
-    // The largest person ID that has been indexed. Used so that we can lazily index when a 
-    // person is added.
+    // The largest entity ID that has been indexed. Used so that we can lazily index when a
+    // entity is added.
     pub(super) max_indexed: usize,
 
     phantom: PhantomData<T>,
@@ -83,36 +84,36 @@ impl<T: Property> Index<T> {
         }
     }
 
-    /// Looks up the value of the `T` property for `person_id` and adds `person_id` to the index 
+    /// Looks up the value of the `T` property for `entity_id` and adds `entity_id` to the index
     /// set for that `value`.
-    pub(crate) fn add_person(&mut self, context: &Context, person_id: PersonId) {
-        let value = context.get_person_property::<T>(person_id).clone();
+    pub(crate) fn add_entity(&mut self, context: &Context, entity_id: EntityId) {
+        let value = T::compute(context, entity_id);
         let value = value.unwrap_or_else(|| {
             // ToDo: This is what Ixa does, but it seems like we'd want to be able to query for people who do not have
             //       a value for a property. Have `None` hash to 0 or something.
             panic!(
                 "{:?} has no {} value to index",
-                person_id,
+                entity_id,
                 T::name()
             );
         });
 
         let index_value = IndexValue::new(&value);
-        self.insert((person_id, index_value));
+        self.insert((entity_id, index_value));
     }
 
-    /// Looks up the value of the `T` property for `person_id` and removes `person_id` from the 
-    /// index set for that `value`. 
-    fn remove_person(&mut self, context: &mut Context, person_id: PersonId) {
-        let value = context.get_person_property::<T>(person_id);
+    /// Looks up the value of the `T` property for `entity_id` and removes `entity_id` from the
+    /// index set for that `value`.
+    fn remove_entity(&mut self, context: &mut Context, entity_id: EntityId) {
+        let value = context.get_property::<T>(entity_id);
         // ToDo: If we index `None` values, we'd have to remove for None, too
         if let Some(value) = value {
             // ToDo: There is a lot of unwrapping here. What if values don't exist?
             let index_value = IndexValue::new(&value);
-            let map: &mut HashMap<IndexValue, HashSet<PersonId>> = self.lookup.as_mut().unwrap();
-            let set: &mut HashSet<PersonId> = map.get_mut(&index_value).unwrap();
+            let map: &mut HashMap<IndexValue, HashSet<EntityId>> = self.lookup.as_mut().unwrap();
+            let set: &mut HashSet<EntityId> = map.get_mut(&index_value).unwrap();
 
-            set.remove(&person_id);
+            set.remove(&entity_id);
             // Clean up the entry if there are no people
             if set.is_empty() {
                 map.remove(&index_value);
@@ -120,32 +121,33 @@ impl<T: Property> Index<T> {
         }
     }
 
-    pub(crate) fn index_unindexed_people(&mut self, context: &Context) {
+    pub(crate) fn index_unindexed_entities(&mut self, context: &Context) {
         if self.lookup.is_none() {
             return;
         }
-        let current_pop = context.get_current_population();
+        let current_pop = context.get_entity_count();
         for id in self.max_indexed..current_pop {
-            let person_id = PersonId(id);
-            self.add_person(context, person_id);
+            let entity_id = EntityId(id);
+            self.add_entity(context, entity_id);
         }
         self.max_indexed = current_pop;
     }
-    
-    /// Inserts the `person_id` into the index set for the given index value.
-    pub(crate) fn insert(&mut self, (person_id, index_value): (PersonId, IndexValue)) {
+
+    /// Inserts the `entity_id` into the index set for the given index value.
+    pub(crate) fn insert(&mut self, (entity_id, index_value): (EntityId, IndexValue)) {
+        // ToDo: Can `self.lookup` ever be `None` here?
         self.lookup
             .as_mut()
             .unwrap()
             .entry(index_value)
-            .or_insert_with(HashSet::new)
-            .insert(person_id);
+            .or_insert_with(HashSet::default)
+            .insert(entity_id);
     }
 }
 
 
-// We don't use the `define_any_map_container!` macro, because the insert method inserts a 
-// `(PersonId, IndexValue)`, not a `T: Property`.
+// We don't use the `define_any_map_container!` macro, because the insert method inserts a
+// `(EntityId, IndexValue)`, not a `T: Property`.
 // define_any_map_container!(
 //     IndexMap,
 //     Index<T: Property>,
@@ -167,15 +169,15 @@ impl IndexMap {
     #[inline(always)]
     pub fn new() -> IndexMap {
         IndexMap {
-            map: HashMap::new(),
+            map: HashMap::default(),
         }
     }
 
     #[inline(always)]
     pub fn insert<T: Property>(&mut self, index: Index<T>) {
-        self.map
-            .insert(type_of::<T>(), Box::new(index))
-            .expect("failed to insert type Index into IndexMap");
+        let result = self.map.insert(type_of::<T>(), Box::new(index));
+        // We shouldn't insert an index for a type that already has an index.
+        assert!(result.is_none());
     }
 
     #[inline(always)]
@@ -209,7 +211,7 @@ impl IndexMap {
             .downcast_ref()
             .unwrap_unchecked()
     }}
-    
+
     #[inline(always)]
     pub fn contains_key(&self, type_of: &TypeId) -> bool {
         self.map.contains_key(type_of)
@@ -221,7 +223,7 @@ pub fn process_indices(
     context: &Context,
     remaining_indices: &[&Index],
     property_names: &mut Vec<String>,
-    current_matches: &HashSet<PersonId>,
+    current_matches: &HashSet<EntityId>,
     print_fn: &dyn Fn(&Context, &[String], usize),
 ) {
     if remaining_indices.is_empty() {

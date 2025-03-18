@@ -1,13 +1,13 @@
 use crate::{infection_manager::InfectionStatusEvent, people::InfectionStatusValue};
 use csv;
-use ixa_core::{Context, ContextReportExt, IxaError, PersonId, Report, create_report_trait, trace};
+use ixa_core::{Context, ContextReportExt, IxaError, EntityId, Report, create_report_trait, trace};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct IncidenceReportItem {
     time: f64,
-    person_id: PersonId,
+    entity_id: EntityId,
     infection_status: InfectionStatusValue,
 }
 
@@ -16,11 +16,11 @@ create_report_trait!(IncidenceReportItem);
 fn handle_infection_status_change(context: &mut Context, event: InfectionStatusEvent) {
     trace!(
         "Recording infection status change from {:?} to {:?} for {:?}",
-        event.previous, event.current, event.person_id
+        event.previous, event.current, event.entity_id
     );
     context.send_report(IncidenceReportItem {
         time: context.get_current_time(),
-        person_id: event.person_id,
+        entity_id: event.entity_id,
         infection_status: event.current,
     });
 }

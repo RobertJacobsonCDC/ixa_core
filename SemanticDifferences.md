@@ -1,7 +1,7 @@
-Surely `ContextPeopleExtInteral` should be `pub(crate)`:
+Surely `ContextPeopleExtInteral` should be `pub(crate)` or private:
 
 ```rust
-pub trait ContextPeopleExtInternal
+pub trait ContextPeopleExtInternal...
 ```
 
 # Best Practice and Style
@@ -13,7 +13,7 @@ pub trait ContextPeopleExtInternal
 
 # "Semantic" Differences
 
- - Global properties are not global to the `Context` instance, not global to the program.
+ - Global properties are global to the `Context` instance, not global to the program.
  - Since it's only called for derived properties, `Property::dependencies` is now `Property::collect_dependencies(dependencies: &mut Vec<TypeId>)` and pushes `type_of<Self>()` if the property is not derived.
  - Some `panic`s in cases of lazily created objects not existing have been turned into just the construction of the object. 
    - A property can be queried before it's assigned

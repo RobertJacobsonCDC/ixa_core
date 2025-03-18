@@ -2,7 +2,7 @@ use crate::new_trait::New;
 use crate::type_of;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-
+use crate::entity::EntityData;
 
 pub trait DataPlugin: 'static {
     /// A constant reference to a constructor

@@ -5,17 +5,19 @@ use std::{
 };
 use crate::{
     New,
-    PersonId,
+    EntityId,
     error::IxaError,
-    people::{Index, IndexMap, InitializationList},
+    entity::{Index, IndexMap, InitializationList},
     property::{Property, PropertyInfo},
     property_map::{PropertyMap, PropertyStore}
 };
 
-/// Stores all data associated to people and their properties.
-pub(crate) struct PeopleData {
-    // pub(super) is_initializing: bool,
-    pub(crate) current_population: usize,
+/// Stores all data associated to entities and their properties.
+pub struct EntityData {
+    /// FLag to prevent `set_property` event from being generated upon new entity creation.
+    pub(super) is_initializing: bool,
+    /// How many entities exist.
+    pub(crate) entity_count: usize,
     /// Map from type `T: Property` to `PropertyStore`, a wrapper for `Vec<Option<T>>`
     pub(crate) properties_map: PropertyMap,
     /// Records which types have been registered with all of their dependencies in `dependency_map`
@@ -29,10 +31,11 @@ pub(crate) struct PeopleData {
     pub(crate) property_metadata: Vec<PropertyInfo>,
 }
 
-impl Default for PeopleData {
+impl Default for EntityData {
     fn default() -> Self {
-        PeopleData {
-            current_population: 0,
+        EntityData {
+            is_initializing: false,
+            entity_count: 0,
             properties_map: PropertyMap::new(),
             registered_derived_properties: vec![],
             dependency_map: HashMap::new(),
@@ -42,34 +45,38 @@ impl Default for PeopleData {
     }
 }
 
-impl New for PeopleData {
-    const new: &'static dyn Fn() -> Self = &PeopleData::default;
+impl New for EntityData {
+    const new: &'static dyn Fn() -> Self = &EntityData::default;
 }
 
-impl PeopleData {
-    pub fn create_population(&mut self, size: usize) {
-        self.current_population = size;
+impl EntityData {
+    pub fn create_entities(&mut self, size: usize) {
+        self.entity_count = size;
     }
 
-    pub fn add_person(&mut self) -> PersonId {
-        let person_id = PersonId(self.current_population);
-        self.current_population += 1;
-        person_id
+    pub fn add_entity(&mut self) -> EntityId {
+        let entity_id = EntityId(self.entity_count);
+        self.entity_count += 1;
+        entity_id
     }
 
-    pub fn get_person_property_ref<T: Property>(&self, person_id: PersonId) -> &Option<T> {
-        let idx = person_id.0;
-        let property_store: &PropertyStore<T> = unsafe{ self.properties_map.get_container_ref_unchecked() };
+    pub fn get_property_ref<T: Property>(&self, entity_id: EntityId) -> Option<&T> {
+        
+        let idx = entity_id.0;
+        match self.properties_map.get_container_ref::<T>() {
+            Some(property_store) if idx >= property_store.len() =>  None,
 
-        if idx >= property_store.len() {
-            &None
-        } else {
-            &property_store.values[idx]
+            Some(property_store) => {
+                property_store.values[idx].as_ref()
+            }
+            
+            None => None
         }
     }
 
-    pub fn get_person_property_mut<T: Property>(&mut self, person_id: PersonId) -> &mut Option<T> {
-        let idx = person_id.0;
+    pub fn get_property_mut<T: Property>(&mut self, entity_id: EntityId) -> &mut Option<T> {
+        assert!(!T::is_derived(), "Cannot set a derived property: {}", T::name());
+        let idx = entity_id.0;
         let property_values: &mut PropertyStore<T> = self.properties_map.get_container_mut();
 
         if idx >= property_values.len() {
@@ -79,18 +86,19 @@ impl PeopleData {
         &mut property_values.values[idx]
     }
 
-    pub fn set_property<T: Property>(&mut self, person_id: PersonId, value: T) {
-        let property = self.get_person_property_mut(person_id);
+    pub fn set_property<T: Property>(&mut self, entity_id: EntityId, value: T) {
+        assert!(!T::is_derived(), "Cannot set a derived property: {}", T::name());
+        let property = self.get_property_mut(entity_id);
         *property = Some(value);
     }
 
-    pub fn get_index_mut<T: Property>(&mut self) -> &mut Index<T> {
+    pub(crate) fn get_index_mut<T: Property>(&mut self) -> &mut Index<T> {
         self.property_indexes
             .get_mut()
             .get_container_mut::<T>()
     }
 
-    pub fn get_index_ref<T: Property>(&mut self) -> Option<&Index<T>> {
+    pub(crate) fn get_index_ref<T: Property>(&mut self) -> Option<&Index<T>> {
         self.property_indexes
             .get_mut()
             .get_container_ref::<T>()
@@ -108,34 +116,34 @@ impl PeopleData {
         Ok(())
     }
 
-    /// Convenience function to iterate over the current population.
-    /// Note that this doesn't hold a reference to PeopleData, so if
-    /// you change the population while using it, it won't notice.
-    pub(super) fn people_iterator(&self) -> Box<dyn Iterator<Item = PersonId>> {
-        pub(super) struct PeopleIterator {
-            population: usize,
-            person_id: usize,
+    /// Convenience function to iterate over the current set of entities.
+    /// Note that this doesn't hold a reference to EntityData, so if
+    /// you change the entity count while using it, it won't notice.
+    pub(super) fn entity_iterator(&self) -> Box<dyn Iterator<Item =EntityId>> {
+        pub(super) struct EntityIterator {
+            entity_count: usize,
+            entity_id: usize,
         }
 
-        impl Iterator for PeopleIterator {
-            type Item = PersonId;
+        impl Iterator for EntityIterator {
+            type Item = EntityId;
 
             fn next(&mut self) -> Option<Self::Item> {
-                let ret = if self.person_id < self.population {
-                    Some(PersonId(self.person_id))
+                let ret = if self.entity_id < self.entity_count {
+                    Some(EntityId(self.entity_id))
                 } else {
                     None
                 };
-                self.person_id += 1;
+                self.entity_id += 1;
 
                 ret
             }
         }
-        
+
         Box::new(
-            PeopleIterator {
-                population: self.current_population,
-                person_id: 0,
+            EntityIterator {
+                entity_count: self.entity_count,
+                entity_id: 0,
             }
         )
     }
@@ -146,7 +154,7 @@ impl PeopleData {
 #[cfg(test)]
 mod tests {
     use crate::context::Context;
-    use crate::people::ContextPeopleExt;
+    use crate::entity::ContextEntityExt;
     use super::*;
 
     #[derive(Clone, Eq, PartialEq, Debug, Hash)]
@@ -167,10 +175,10 @@ mod tests {
 
 
     #[test]
-    fn test_people_data() {
+    fn test_entity_data() {
         let mut context = Context::new();
 
-        context.add_person((Age(10), Name("John Smith".to_string()), InfectionStatus::I))
+        context.add_entity((Age(10), Name("John Smith".to_string()), InfectionStatus::I))
                .expect("Failed to add person");
     }
 }

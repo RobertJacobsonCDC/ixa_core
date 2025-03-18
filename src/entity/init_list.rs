@@ -1,18 +1,18 @@
 use crate::{
+    entity::EntityData,
     property::Property,
-    people::PeopleData,
-    PersonId,
     type_of,
+    EntityId,
     TypeId
 };
 use seq_macro::seq;
 
 /// A trait that contains the initialization values for a
-/// new person. Do not use this directly, but instead use
+/// new entity. Do not use this directly, but instead use
 /// the tuple syntax.
 pub trait InitializationList {
     fn has_property(&self, t: TypeId) -> bool;
-    fn set_properties(self, people_data: &mut PeopleData, person_id: PersonId);
+    fn set_properties(self, entity_data: &mut EntityData, entity_id: EntityId);
 }
 
 // Implement the query version with 0 and 1 parameters
@@ -20,7 +20,7 @@ impl InitializationList for () {
     fn has_property(&self, _: TypeId) -> bool {
         false
     }
-    fn set_properties(self, _people_data: &mut PeopleData, _person_id: PersonId) {}
+    fn set_properties(self, _entity_data: &mut EntityData, _entity_id: EntityId) {}
 }
 
 impl<T1: Property> InitializationList for T1 {
@@ -28,8 +28,8 @@ impl<T1: Property> InitializationList for T1 {
         t == type_of::<T1>()
     }
 
-    fn set_properties(self, people_data: &mut PeopleData, person_id: PersonId) {
-        people_data.set_property::<T1>(person_id, self);
+    fn set_properties(self, entity_data: &mut EntityData, entity_id: EntityId) {
+        entity_data.set_property::<T1>(entity_id, self);
     }
 }
 
@@ -54,9 +54,9 @@ macro_rules! impl_initialization_list {
                     return false
                 }
 
-                fn set_properties(self, people_data: &mut PeopleData, person_id: PersonId)  {
+                fn set_properties(self, entity_data: &mut EntityData, entity_id: EntityId)  {
                     #(
-                       people_data.set_property(person_id, self.N );
+                       entity_data.set_property(entity_id, self.N );
                     )*
                 }
             }

@@ -1,5 +1,5 @@
 use ixa_core::{
-    Context, ContextPeopleExt, ContextRandomExt, PersonId, PersonPropertyChangeEvent, define_rng,
+    Context, ContextPeopleExt, ContextRandomExt, EntityId, PersonPropertyChangeEvent, define_rng,
     trace,
 };
 
@@ -12,13 +12,13 @@ pub type InfectionStatusEvent = PersonPropertyChangeEvent<InfectionStatus>;
 
 define_rng!(InfectionRng);
 
-fn schedule_recovery(context: &mut Context, person_id: PersonId) {
+fn schedule_recovery(context: &mut Context, entity_id: EntityId) {
     trace!("Scheduling recovery");
     let recovery_time = context.get_current_time()
         + context.sample_distr(InfectionRng, Exp::new(1.0 / INFECTION_DURATION).unwrap());
     context.add_plan(recovery_time, move |context| {
         context.set_person_property::<InfectionStatus>(
-            person_id,
+            entity_id,
             InfectionStatus,
             InfectionStatusValue::R,
         );
@@ -28,10 +28,10 @@ fn schedule_recovery(context: &mut Context, person_id: PersonId) {
 fn handle_infection_status_change(context: &mut Context, event: InfectionStatusEvent) {
     trace!(
         "Handling infection status change from {:?} to {:?} for {:?}",
-        event.previous, event.current, event.person_id
+        event.previous, event.current, event.entity_id
     );
     if event.current == InfectionStatusValue::I {
-        schedule_recovery(context, event.person_id);
+        schedule_recovery(context, event.entity_id);
     }
 }
 
