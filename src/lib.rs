@@ -11,9 +11,12 @@ mod random;
 mod hashing;
 pub mod log;
 mod trait_map;
+mod global_properties;
 
 // Re-exports
 pub use rand;
+pub use paste;
+pub use ctor;
 
 // All modules import `crate::TypeId` in case we want to change the underlying type of `TypeId`.
 pub use std::any::TypeId;
