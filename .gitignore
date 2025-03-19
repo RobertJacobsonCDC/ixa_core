@@ -1,3 +1,6 @@
+# Criterion.rs output file.
+profile.json
+
 .vscode
 .idea
 doc
@@ -18,3 +21,5 @@ Cargo.lock
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
 
+# Mac development
+.DS_Store
